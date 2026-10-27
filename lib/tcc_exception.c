@@ -238,3 +238,118 @@ static int valid_category(const struct tcc_exception_type *type)
     return 0;
 }
 
+static int category_matches(const struct tcc_exception_type *actual,
+                            const struct tcc_exception_type *wanted)
+{
+    const struct tcc_exception_type *p;
+    for (p = actual; p; p = p->parent)
+        if (p == wanted)
+            return 1;
+    return 0;
+}
+
+static void throw_current(struct __tcc_try_exception *e)
+{
+    struct __tcc_try_frame *f = tls_get_top();
+
+    if (!f)
+        uncaught_exception(e);
+    if (f->pending)
+        exc_release(f->pending);
+    f->pending = e;
+    f->action = __TCC_TRY_ACTION_EXCEPTION;
+    f->jump(f->env, 1);
+    try_fatal("longjmp returned to throw site");
+}
+
+/* ------------------------------------------------------------------------- */
+/* compiler-facing helpers */
+
+void __tcc_try_enter(struct __tcc_try_frame *frame,
+                     void (*jump)(jmp_buf, int),
+                     unsigned long frame_size,
+                     unsigned long frame_align,
+                     unsigned long env_offset)
+{
+    if (frame_size != sizeof *frame
+        || frame_align != (unsigned long)__alignof__(struct __tcc_try_frame)
+        || env_offset != (unsigned long)offsetof(struct __tcc_try_frame, env))
+        try_fatal("compiler/runtime frame ABI mismatch");
+    if (!jump)
+        try_fatal("missing longjmp entry point");
+
+    frame->prev = tls_get_top();
+    frame->pending = NULL;
+    frame->caught = NULL;
+    frame->jump = jump;
+    frame->phase = __TCC_TRY_PHASE_TRY;
+    frame->action = __TCC_TRY_ACTION_NORMAL;
+    frame->exit_id = 0;
+    frame->abi_size = (int)frame_size;
+    tls_set_top(frame);
+}
+
+int __tcc_try_landing(struct __tcc_try_frame *frame)
+{
+    if (!frame || tls_get_top() != frame)
+        try_fatal("landing on a frame that is not the current frame");
+    return frame->phase;
+}
+
+int __tcc_try_match(struct __tcc_try_frame *frame,
+                    const struct tcc_exception_type *type)
+{
+    struct __tcc_try_exception *e;
+
+    if (!frame || frame->phase != __TCC_TRY_PHASE_TRY || !frame->pending)
+        return 0;
+    if (!category_matches(frame->pending->view.type, type))
+        return 0;
+    e = frame->pending;
+    frame->pending = NULL;
+    frame->caught = e;
+    frame->phase = __TCC_TRY_PHASE_CATCH;
+    frame->action = __TCC_TRY_ACTION_NORMAL;
+    return 1;
+}
+
+int __tcc_try_match_any(struct __tcc_try_frame *frame)
+{
+    if (!frame || frame->phase != __TCC_TRY_PHASE_TRY || !frame->pending)
+        return 0;
+    frame->caught = frame->pending;
+    frame->pending = NULL;
+    frame->phase = __TCC_TRY_PHASE_CATCH;
+    frame->action = __TCC_TRY_ACTION_NORMAL;
+    return 1;
+}
+
+void __tcc_try_bind(struct __tcc_try_frame *frame, struct tcc_exception *out)
+{
+    if (!frame || !frame->caught)
+        try_fatal("catch binding without a caught exception");
+    if (out)
+        *out = frame->caught->view;
+}
+
+void __tcc_try_normal(struct __tcc_try_frame *frame)
+{
+    if (!frame)
+        try_fatal("normal completion without a frame");
+    if (frame->pending) {
+        exc_release(frame->pending);
+        frame->pending = NULL;
+    }
+    frame->action = __TCC_TRY_ACTION_NORMAL;
+    frame->phase = __TCC_TRY_PHASE_FINALLY;
+}
+
+void __tcc_try_begin_finally(struct __tcc_try_frame *frame, int action, int id)
+{
+    if (!frame)
+        try_fatal("finalizer without a frame");
+    frame->action = action;
+    frame->exit_id = id;
+    frame->phase = __TCC_TRY_PHASE_FINALLY;
+}
+
