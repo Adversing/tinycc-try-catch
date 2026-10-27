@@ -156,6 +156,12 @@ endif
 144_tls.test: FLAGS += -pthread
 144_tls.test: NORUN = true
 
+# this test returns a deliberate nonzero status
+101_cleanup.test: STATUS = 105
+126_bound_global.test: STATUS = 255
+# uses 'void main'; the process status is incidental
+137_funcall_struct_args.test: STATUS = any
+
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)
 146_tls_extern.test: T1 = \
@@ -179,10 +185,19 @@ endif
 148_linker_symbols.test: GEN=$(T1)
 
 # Filter source directory in warnings/errors (out-of-tree builds)
-FILTER = 2>&1 | sed -e 's,$(SRC)/,,g'
+FILTER = sed -e 's,$(SRC)/,,g'
 
 all test tests2.all: $(filter-out $(SKIP),$(TESTS))
 	@$(MAKE) clean --no-print-directory -s
+
+# Tests are expected to exit with STATUS.  Tests that intentionally fail to
+# compile, or that are expected to abort at run time, override it.
+STATUS = 0
+CHECK_STATUS = case '$(STATUS)' in \
+    any) : ;; \
+    nonzero) test $$s -ne 0 ;; \
+    *) test $$s -eq $(STATUS) ;; \
+    esac
 
 %.test: %.c %.expect
 	@echo Test: $*...
@@ -190,8 +205,9 @@ all test tests2.all: $(filter-out $(SKIP),$(TESTS))
 
 T1 = $(TCC) $(FLAGS) $(T2) $(ARGS)
 T2 = $(if $(NORUN),$1 -o $*.exe && ./$*.exe,-run $1)
-T3 = $(FILTER) >$*.output 2>&1 || true \
-     && diff -Nbu $(filter %.expect,$^) $*.output \
+T3 = >$*.output.raw 2>&1; s=$$?; \
+     $(FILTER) <$*.output.raw >$*.output && rm -f $*.output.raw \
+     && diff -Nbu $(filter %.expect,$^) $*.output && $(CHECK_STATUS) \
      && rm -f $*.output $(filter $*.expect,$(GEN-ALWAYS))
 
 # run single test and update .expect file, e.g. "make tests2.37+"
@@ -212,7 +228,7 @@ F2 = $1 UPDATE="$(patsubst %.test,%.expect,$1)"
 # automatically generate .expect files with gcc:
 %.expect :
 	@echo Generating: $@
-	@$(call GEN,$(SRC)/$*.c) $(FILTER) >$@ 2>&1
+	@$(call GEN,$(SRC)/$*.c) 2>&1 | $(FILTER) >$@
 	@rm -f *.exe *.obj *.pdb
 
 # using TCC for .expect if -dt in FLAGS
@@ -230,4 +246,4 @@ $(sort $(GEN-ALWAYS) $(UPDATE)) : force
 force:
 
 clean :
-	rm -f fred.txt *.output *.o *.a *.exe *.dll *.so *.def $(GEN-ALWAYS)
+	rm -f fred.txt *.output *.output.raw *.o *.a *.exe *.dll *.so *.def $(GEN-ALWAYS)
