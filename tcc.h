@@ -523,6 +523,9 @@ struct FuncAttr {
     xxxx        : 15;
 };
 
+struct try_region;
+struct try_scope;
+
 /* symbol management */
 typedef struct Sym {
     int v; /* symbol token */
@@ -558,6 +561,8 @@ typedef struct Sym {
         struct Sym *cleanup_sym; /* symbol from __attribute__((cleanup())) */
         struct Sym *cleanup_label; /* label in 'pending_gotos' chain */
     };
+    struct try_region *try_region; /* protected region of a defined label */
+    struct try_scope *try_scope; /* stable scope snapshot of a defined label */
 } Sym;
 
 /* section definition */
@@ -757,6 +762,7 @@ struct TCCState {
     unsigned char reverse_funcargs; /* if true, evaluate last function arg first */
     unsigned char gnu89_inline; /* treat 'extern inline' like 'static inline' */
     unsigned char unwind_tables; /* create eh_frame section */
+    unsigned char try_catch; /* enable try/catch/finally extension */
 
     /* warning switches */
     unsigned char warn_none;
@@ -977,6 +983,7 @@ struct TCCState {
     const char *run_main; /* entry for tcc_run() */
     void *run_ptr; /* runtime_memory */
     unsigned run_size; /* size of runtime_memory  */
+    void (*run_try_shutdown)(void); /* cached __tcc_try_shutdown, if linked */
     const char *run_stdin; /* custom stdin file for run_main */
 #ifdef _WIN64
     void *run_function_table; /* unwind data */
@@ -1745,6 +1752,8 @@ ST_FUNC int tcc_load_coff(TCCState * s1, int fd);
 ST_FUNC void asm_instr(void);
 ST_FUNC void asm_global_instr(void);
 ST_FUNC int tcc_assemble(TCCState *s1, int do_preprocess);
+ST_FUNC void tcc_try_check_identifier(int t);
+ST_FUNC void tcc_try_note_asm_goto(void);
 #ifdef CONFIG_TCC_ASM
 ST_FUNC int find_constraint(ASMOperand *operands, int nb_operands, const char *name, const char **pp);
 ST_FUNC Sym* get_asm_sym(int name, Sym *csym);

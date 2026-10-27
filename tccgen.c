@@ -97,6 +97,7 @@ static struct switch_t {
     int nocode_wanted;
     int *bsym;
     struct scope *scope;
+    struct try_region *try_region;
     struct switch_t *prev;
     SValue sv;
 } *cur_switch; /* current switch */
@@ -110,12 +111,102 @@ static struct temp_local_variable {
 } arr_temp_local_vars[MAX_TEMP_LOCAL_VARIABLE_NUMBER];
 static int nb_temp_local_vars;
 
+/* ------------------------------------------------------------------------- */
+/* try/catch/finally state */
+
+#define TRY_REGION_BODY    0
+#define TRY_REGION_CATCH   1
+#define TRY_REGION_FINALLY 2
+
+struct try_block;
+struct scope;
+struct try_scope {
+    struct try_scope *parent;
+    struct try_scope *all_next;
+    Sym *cleanup;
+    int id;
+    int vla_num;
+    int vla_locorig;
+    int vla_loc;
+};
+
+struct try_region {
+    struct try_region *parent;
+    struct try_region *all_next; /* function-wide ownership list */
+    struct try_block *owner;
+    struct try_scope *entry_scope;
+    Sym *cl_stop;
+    int kind;
+};
+
+struct try_exit {
+    int id;
+    int cont_addr;
+    struct try_exit *next;
+};
+
+struct try_catch_info {
+    Sym *cat;
+    int any;
+    int label;
+    struct try_catch_info *next;
+};
+
+struct try_block {
+    struct try_block *prev;      /* dynamically enclosing construct */
+    struct try_block *all_next;  /* function-wide list */
+    struct try_region *outer;
+    struct try_region *body;
+    int frame_off;
+    int has_finally;
+    int has_catch;
+    int finally_jmp;             /* jumps to finalizer entry */
+    int finish_jmp;              /* jumps to the finish trampoline */
+    int body_done_jmp;           /* normal-completion jumps */
+    int land_jmp;                /* setjmp result -> landing */
+    int finally_entry;
+    int body_done_addr;
+    int after_addr;
+    int completed;
+    struct try_exit *exits;
+    struct try_catch_info *catches;
+    struct try_region *regions;
+};
+
+struct try_pending_goto {
+    int jmp;
+    Sym *label;
+    struct try_region *from;
+    struct try_scope *scope;
+    struct try_pending_goto *next;
+};
+
+struct try_catch_lex {
+    int frame_off;
+    struct try_catch_lex *prev;
+};
+
+static struct try_block *cur_try, *all_tries, *all_tries_tail;
+static struct try_region *cur_try_region;
+static struct try_pending_goto *try_pending_gotos;
+static struct try_catch_lex *cur_catch_lex;
+static int try_next_exit_id;
+static int try_return_off;
+static int try_void_return_jmp;
+static int try_func_used;
+static int try_func_unsupported;
+static int try_next_scope_id;
+static struct try_scope *try_scopes;
+static Sym *try_saved_symbols;
+
 static struct scope {
     struct scope *prev;
     struct { int loc, locorig, num; } vla;
     struct { Sym *s; int n; } cl;
     int *bsym, *csym;
     Sym *lstk, *llstk;
+    struct try_region *try_region;
+    int try_id;
 } *cur_scope, *loop_scope, *root_scope;
 
 typedef struct {
@@ -162,6 +253,12 @@ static int get_temp_local_var(int size,int align,int *r2);
 static void cast_error(CType *st, CType *dt);
 static void end_switch(void);
 static void do_Static_assert(void);
+static void try_check_identifier(int t);
+static void try_note_computed_goto(void);
+static void try_stmt(void);
+static void try_throw_stmt(void);
+static void try_function_cleanup(void);
+static void try_retain_symbols(Sym **stack, Sym *stop);
 
 /* ------------------------------------------------------------------------- */
 /* Automagical code suppression */
