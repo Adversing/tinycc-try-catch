@@ -88,6 +88,8 @@ $(TOP)/$(X)libtcc1.a : $(OBJ-libtcc1) $(TCC)
 $(X)%.o : %.c $(TCC)
 	$S$(XCC) -c $< -o $@ $(XFLAGS)
 
+$(X)tcc_exception.o : $(TOPSRC)/include/tcc_exception.h
+
 $(X)%.o : %.S $(TCC)
 	$S$(XCC) -c $< -o $@ $(XFLAGS)
 
