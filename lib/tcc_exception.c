@@ -353,3 +353,72 @@ void __tcc_try_begin_finally(struct __tcc_try_frame *frame, int action, int id)
     frame->phase = __TCC_TRY_PHASE_FINALLY;
 }
 
+static void pop_frame(struct __tcc_try_frame *frame)
+{
+    if (!frame || tls_get_top() != frame)
+        try_fatal("frame stack corruption");
+    if (frame->pending) {
+        exc_release(frame->pending);
+        frame->pending = NULL;
+    }
+    if (frame->caught) {
+        exc_release(frame->caught);
+        frame->caught = NULL;
+    }
+    tls_set_top(frame->prev);
+    frame->prev = NULL;
+}
+
+int __tcc_try_finish(struct __tcc_try_frame *frame)
+{
+    int id;
+
+    if (!frame)
+        try_fatal("finish without a frame");
+
+    if (frame->action == __TCC_TRY_ACTION_EXCEPTION) {
+        struct __tcc_try_exception *e = frame->pending;
+        struct __tcc_try_frame *prev;
+
+        frame->pending = NULL;
+        if (frame->caught) {
+            exc_release(frame->caught);
+            frame->caught = NULL;
+        }
+        prev = frame->prev;
+        if (!frame || tls_get_top() != frame)
+            try_fatal("frame stack corruption");
+        tls_set_top(prev);
+        frame->prev = NULL;
+
+        if (!prev)
+            uncaught_exception(e);
+        if (prev->pending)
+            exc_release(prev->pending);
+        prev->pending = e;
+        prev->action = __TCC_TRY_ACTION_EXCEPTION;
+        prev->jump(prev->env, 1);
+        try_fatal("longjmp returned during propagation");
+    }
+
+    id = frame->exit_id;
+    pop_frame(frame);
+    return id;
+}
+
+void __tcc_try_pop(struct __tcc_try_frame *frame)
+{
+    pop_frame(frame);
+}
+
+void __tcc_try_rethrow(struct __tcc_try_frame *frame)
+{
+    struct __tcc_try_exception *e;
+
+    if (!frame || !frame->caught)
+        try_fatal("rethrow without a caught exception");
+    e = frame->caught;
+    exc_retain(e);
+    throw_current(e);
+}
+
