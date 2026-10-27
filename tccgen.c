@@ -7622,6 +7622,128 @@ static void try_emit_begin_finally(struct try_block *tb, int action, int id)
     gfunc_call(3);
 }
 
+static int try_region_ancestor(struct try_region *r, struct try_region *a)
+{
+    for (; r; r = r->parent)
+        if (r == a)
+            return 1;
+    return 0;
+}
+
+static void try_emit_cleanup_nca(Sym *cl, Sym *cleanupstate)
+{
+    int cd = cl ? (cl->v & ~SYM_FIELD) : 0;
+    int td = cleanupstate ? (cleanupstate->v & ~SYM_FIELD) : 0;
+    Sym *tc = cleanupstate;
+
+    while (cd > td && cl) {
+        try_call_one_cleanup(cl);
+        cl = cl->next;
+        --cd;
+    }
+    while (td > cd && tc) {
+        tc = tc->next;
+        --td;
+    }
+    while (cl != tc && cl && tc) {
+        try_call_one_cleanup(cl);
+        cl = cl->next;
+        tc = tc->next;
+    }
+}
+
+/* unwind protected regions from 'from' up to (but not including) 'to',
+   interleaving user cleanups and VLA restores with finalizers. Then emit
+   the final cleanup for the target and return to the caller, which emits
+   the actual transfer instruction. */
+static void try_emit_exit(struct try_region *from, struct try_region *to,
+                          int is_return, int target, int *chain,
+                          Sym *target_cleanup, struct try_scope *target_scope,
+                          struct try_scope *source_scope)
+{
+    struct try_region *r = from;
+    Sym *cl = source_scope->cleanup;
+
+    if (to && !try_region_ancestor(from, to))
+        tcc_error("control enters a protected try/catch/finally region");
+
+    while (r != to) {
+        struct try_block *tb;
+        if (!r)
+            tcc_error("control enters or leaves a protected region");
+        tb = r->owner;
+        if (!tb)
+            break;
+        if (r->kind == TRY_REGION_FINALLY)
+            tcc_error("control cannot leave a finally block");
+        while (cl != r->cl_stop) {
+            if (!cl)
+                tcc_error("internal: cleanup chain mismatch");
+            try_call_one_cleanup(cl);
+            cl = cl->next;
+        }
+        try_vla_leave(source_scope, r->entry_scope);
+        source_scope = r->entry_scope;
+        {
+            struct try_exit *ex;
+            int j, cont;
+            int id = try_next_exit_id++;
+            try_emit_begin_finally(tb, 2 /* JUMP */, id);
+            if (tb->has_finally && tb->finally_entry) {
+                gjmp_addr(tb->finally_entry);
+            } else {
+                j = gjmp(0);
+                if (tb->completed)
+                    tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
+                else
+                    tb->finally_jmp = gjmp_append(j, tb->finally_jmp);
+            }
+            CODE_OFF();
+            cont = gind();
+            ex = tcc_mallocz(sizeof *ex);
+            ex->id = id;
+            ex->cont_addr = cont;
+            ex->next = tb->exits;
+            tb->exits = ex;
+        }
+        r = tb->outer;
+    }
+
+    if (is_return) {
+        while (cl) {
+            try_call_one_cleanup(cl);
+            cl = cl->next;
+        }
+        try_vla_leave(source_scope, target_scope);
+        if ((func_vt.t & VT_BTYPE) == VT_VOID) {
+            /* jump to the common void-return epilogue */
+            try_void_return_jmp = gjmp(try_void_return_jmp);
+        } else {
+            if (try_return_off == 0)
+                tcc_error("internal: missing return slot (exit)");
+            vset(&func_vt, VT_LOCAL | VT_LVAL, try_return_off);
+            gfunc_return(&func_vt);
+            rsym = gjmp(rsym);
+        }
+        CODE_OFF();
+    } else if (target_scope) {
+        try_emit_cleanup_nca(cl, target_cleanup);
+        try_vla_leave(source_scope, target_scope);
+        if (target >= 0)
+            gjmp_addr(target);
+        else if (chain)
+            *chain = gjmp(*chain);
+        CODE_OFF();
+    } else {
+        try_emit_cleanup_nca(cl, target_cleanup);
+        if (target >= 0)
+            gjmp_addr(target);
+        else if (chain)
+            *chain = gjmp(*chain);
+        CODE_OFF();
+    }
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
