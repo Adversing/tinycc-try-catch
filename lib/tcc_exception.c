@@ -78,3 +78,86 @@ static void uncaught_exception(struct __tcc_try_exception *e)
 }
 
 /* ------------------------------------------------------------------------- */
+/* per-thread top frame */
+
+#ifdef _WIN32
+
+static DWORD tls_key = TLS_OUT_OF_INDEXES;
+static volatile LONG tls_state; /* 0=uninit, 1=busy, 2=ready, 3=failed, 4=off */
+
+static void tls_init(void)
+{
+    LONG old;
+    DWORD key;
+
+    for (;;) {
+        old = InterlockedCompareExchange(&tls_state, 1, 0);
+        if (old == 0) {
+            key = TlsAlloc();
+            if (key == TLS_OUT_OF_INDEXES) {
+                InterlockedExchange(&tls_state, 3);
+                try_fatal("cannot allocate TLS key");
+            }
+            tls_key = key;
+            InterlockedExchange(&tls_state, 2);
+            return;
+        }
+        if (old == 2)
+            return;
+        if (old == 3)
+            try_fatal("TLS initialization failed earlier");
+        if (old == 4)
+            try_fatal("runtime used after shutdown");
+        Sleep(0);
+    }
+}
+
+static struct __tcc_try_frame *tls_get_top(void)
+{
+    tls_init();
+    return (struct __tcc_try_frame *)TlsGetValue(tls_key);
+}
+
+static void tls_set_top(struct __tcc_try_frame *frame)
+{
+    if (!TlsSetValue(tls_key, frame))
+        try_fatal("cannot update TLS frame pointer");
+}
+
+void __tcc_try_shutdown(void)
+{
+    LONG old = InterlockedExchange(&tls_state, 4);
+    DWORD key;
+
+    if (old == 2) {
+        key = tls_key;
+        tls_key = TLS_OUT_OF_INDEXES;
+        TlsSetValue(key, NULL);
+        TlsFree(key);
+    }
+}
+
+#else
+
+static __thread struct __tcc_try_frame *tls_top;
+
+static struct __tcc_try_frame *tls_get_top(void)
+{
+    return tls_top;
+}
+
+static void tls_set_top(struct __tcc_try_frame *frame)
+{
+    tls_top = frame;
+}
+
+void __tcc_try_shutdown(void)
+{
+    tls_top = NULL;
+}
+
+#endif
+
+/* ------------------------------------------------------------------------- */
+/* exception objects */
+
