@@ -7744,6 +7744,104 @@ static void try_emit_exit(struct try_region *from, struct try_region *to,
     }
 }
 
+static Sym *try_parse_category(void)
+{
+    Sym *s, *tag;
+    if (tok < TOK_UIDENT || try_is_keyword(tok))
+        expect("exception category identifier");
+    s = sym_find(tok);
+    if (!s)
+        tcc_error("unknown exception category '%s'", get_tok_str(tok, NULL));
+    tag = try_tag("__tcc_exception_type");
+    if (!(s->r & VT_SYM)
+        || (s->r & VT_VALMASK) != VT_CONST
+        || (s->type.t & VT_BTYPE) != VT_STRUCT
+        || s->type.ref != tag
+        || !(s->type.t & VT_CONSTANT))
+        tcc_error("'%s' is not a const struct tcc_exception_type object "
+                  "with static storage duration", get_tok_str(tok, NULL));
+    next();
+    return s;
+}
+
+static void try_parse_catch_body(struct try_block *tb, int bind_tok,
+                                 struct try_region *creg)
+{
+    struct scope o;
+    CType btype;
+    int bind_off = -1, size, align;
+
+    next(); /* skip '{' */
+    new_scope(&o);
+    cur_scope->try_region = creg;
+    if (bind_tok) {
+        Sym *s = try_tag("__tcc_exception_record");
+        btype.t = s->type.t | VT_CONSTANT;
+        btype.ref = s;
+        size = type_size(&btype, &align);
+        bind_off = try_alloc_local(size, align);
+        sym_push(bind_tok, &btype, VT_LOCAL | VT_LVAL, bind_off);
+        try_emit_bind(tb, bind_off);
+    }
+    while (tok != '}') {
+        decl(VT_LOCAL);
+        if (tok != '}')
+            block(STMT_COMPOUND);
+    }
+    prev_scope(&o, 0);
+    skip('}');
+}
+
+static void try_emit_catches(struct try_block *tb)
+{
+    struct try_catch_info *ci;
+    int j_not_try, j_not_catch, j;
+
+    gsym(tb->land_jmp);
+    try_emit_landing(tb);
+
+    /* phase TRY: examine the handlers in source order. */
+    vpushi(0);
+    gen_op(TOK_EQ);
+    j_not_try = gvtst(1, 0);
+
+    for (ci = tb->catches; ci; ci = ci->next) {
+        int jf;
+        try_emit_match(tb, ci->cat, ci->any);
+        jf = gvtst(1, 0); /* no match -> next clause */
+        gjmp_addr(ci->label);
+        gsym(jf);
+    }
+
+    /* no handler matched: retain the pending exception. */
+    if (tb->has_finally) {
+        try_emit_begin_finally(tb, 1 /* EXCEPTION */, 0);
+        j = gjmp(0);
+        tb->finally_jmp = gjmp_append(j, tb->finally_jmp);
+    } else {
+        j = gjmp(0);
+        tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
+    }
+
+    gsym(j_not_try);
+
+    /* phase CATCH: a new transfer from a handler. Run the finalizer once.
+       phase FINALLY: the finalizer itself threw; skip it and finish. */
+    if (tb->has_finally) {
+        try_emit_landing(tb);
+        vpushi(1);
+        gen_op(TOK_EQ);
+        j_not_catch = gvtst(1, 0);
+        try_emit_begin_finally(tb, 1 /* EXCEPTION */, 0);
+        j = gjmp(0);
+        tb->finally_jmp = gjmp_append(j, tb->finally_jmp);
+        gsym(j_not_catch);
+    }
+
+    j = gjmp(0);
+    tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
