@@ -7376,6 +7376,102 @@ static void try_check_switch_label(int t)
                   get_tok_str(t, NULL));
 }
 
+static Sym *try_tag(const char *name)
+{
+    Sym *s;
+
+    if (!define_find(tok_alloc_const("TCC_EXCEPTION_H")))
+        tcc_error("try/catch/finally requires #include <tcc_exception.h>");
+    s = sym_find(tok_alloc_const(name));
+    if (!s || !(s->type.t & VT_TYPEDEF)
+        || (s->type.t & VT_BTYPE) != VT_STRUCT)
+        tcc_error("try/catch/finally requires #include <tcc_exception.h>");
+    return s->type.ref;
+}
+
+static void try_frame_type(CType *type)
+{
+    Sym *s = try_tag("__tcc_try_frame_type");
+    type->t = s->type.t;
+    type->ref = s;
+}
+
+static int try_alloc_local(int size, int align)
+{
+    loc = (loc - size) & -align;
+    return loc;
+}
+
+/* unlink ended scopes from parser lookup, but retain the symbols and their
+   type graphs until deferred gotos and finalizer continuations are emitted. */
+static void try_retain_symbols(Sym **stack, Sym *stop)
+{
+    Sym *head = *stack, *tail;
+
+    if (head == stop)
+        return;
+    for (tail = head; tail->prev != stop; tail = tail->prev)
+        ;
+    tail->prev = try_saved_symbols;
+    try_saved_symbols = head;
+    *stack = stop;
+}
+
+static struct try_scope *try_save_scope(struct scope *scope)
+{
+    struct try_scope *s;
+
+    if (!scope)
+        return NULL;
+    s = tcc_mallocz(sizeof *s);
+    s->all_next = try_scopes;
+    try_scopes = s;
+    s->id = scope->try_id;
+    s->cleanup = scope->cl.s;
+    s->vla_num = scope->vla.num;
+    s->vla_locorig = scope->vla.locorig;
+    s->vla_loc = scope->vla.loc;
+    s->parent = try_save_scope(scope->prev);
+    return s;
+}
+
+/* restore only VLA scopes left by this transfer. Snapshots preserve which
+   stack slots had actually been initialized at its source. */
+static void try_vla_leave(struct try_scope *from, struct try_scope *to)
+{
+    struct try_scope *s, *t;
+    int restore = 0;
+
+    for (s = from; s; s = s->parent) {
+        for (t = to; t && t->id != s->id; t = t->parent)
+            ;
+        if (t) {
+            /* a backward jump can leave VLA declarations while remaining
+               in the same lexical scope. The target slot predates them. */
+            if (s->vla_num > t->vla_num)
+                restore = t->vla_num ? t->vla_loc : s->vla_locorig;
+            break;
+        }
+        if (s->vla_num)
+            restore = s->vla_locorig;
+    }
+    vla_restore(restore);
+}
+
+static struct try_region *try_new_region(struct try_block *tb, int kind)
+{
+    struct try_region *r = tcc_mallocz(sizeof *r);
+
+    r->all_next = tb->regions;
+    tb->regions = r;
+    r->parent = tb->outer;
+    r->owner = tb;
+    r->entry_scope = try_save_scope(cur_scope);
+    r->cl_stop = cur_scope->cl.s;
+    r->kind = kind;
+    return r;
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
