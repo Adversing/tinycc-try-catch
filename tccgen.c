@@ -7891,6 +7891,71 @@ static void try_stmt(void)
     }
     CODE_OFF();
 
+    while (tok == TOK_CATCH) {
+        struct try_catch_info *ci;
+        struct try_region *creg;
+        Sym *cat = NULL;
+        int any = 0, bind_tok = 0, label;
+        struct try_catch_lex catch_lex;
+
+        if (has_finally)
+            tcc_error("catch after finally");
+        next();
+        skip('(');
+        if (tok == TOK_DOTS) {
+            any = 1;
+            if (seen_ellipsis)
+                tcc_error("duplicate catch (...)");
+            seen_ellipsis = 1;
+            next();
+        } else {
+            if (seen_ellipsis)
+                tcc_error("catch (...) must be the last catch");
+            if (tok == ')')
+                tcc_error("empty catch parentheses");
+            cat = try_parse_category();
+            if (tok != ')') {
+                if (tok < TOK_UIDENT || try_is_keyword(tok))
+                    expect("catch binding identifier");
+                bind_tok = tok;
+                next();
+            }
+        }
+        skip(')');
+        if (tok != '{')
+            expect("'{'");
+
+        creg = try_new_region(tb, TRY_REGION_CATCH);
+
+        label = gind();
+        ci = tcc_mallocz(sizeof *ci);
+        ci->cat = cat;
+        ci->any = any;
+        ci->label = label;
+        if (catch_tail)
+            catch_tail->next = ci;
+        else
+            tb->catches = ci;
+        catch_tail = ci;
+        catch_count++;
+
+        saved_region = cur_try_region;
+        cur_try_region = creg;
+        catch_lex.frame_off = tb->frame_off;
+        catch_lex.prev = cur_catch_lex;
+        cur_catch_lex = &catch_lex;
+
+        try_parse_catch_body(tb, bind_tok, creg);
+
+        cur_catch_lex = catch_lex.prev;
+        cur_try_region = saved_region;
+        if (!(nocode_wanted & CODE_OFF_BIT)) {
+            j = gjmp(0);
+            tb->body_done_jmp = gjmp_append(j, tb->body_done_jmp);
+        }
+        CODE_OFF();
+    }
+
     if (tok == TOK_FINALLY) {
         has_finally = 1;
         tb->has_finally = 1;
