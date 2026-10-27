@@ -4272,6 +4272,7 @@ static Sym * find_field (CType *type, int v, int *cumofs)
             expect("struct or union");
         if (v < TOK_UIDENT)
             expect("field name");
+        try_check_identifier(v);
         if (s->c < 0)
             tcc_error("dereferencing incomplete type '%s'",
                 get_tok_str(s->v & ~SYM_STRUCT, 0));
@@ -4584,8 +4585,10 @@ static void struct_decl(CType *type, int u)
     parse_attribute(&ad);
 
     v = 0;
-    if (tok >= TOK_IDENT) /* struct/enum tag */
+    if (tok >= TOK_IDENT) { /* struct/enum tag */
+        try_check_identifier(tok);
         v = tok, next();
+    }
 
     bt = ut = 0;
     if (u == VT_ENUM) {
@@ -4646,6 +4649,7 @@ do_decl:
                 v = tok;
                 if (v < TOK_UIDENT)
                     expect("identifier");
+                try_check_identifier(v);
                 next();
                 if (tok == '=') {
                     next();
@@ -5217,6 +5221,7 @@ static int post_type(CType *type, AttributeDef *ad, int storage, int td)
                 }
                 if (n < TOK_UIDENT)
                     expect("identifier");
+                try_check_identifier(n);
                 convert_parameter_type(&pt);
                 arg_size += (type_size(&pt, &align) + PTR_SIZE - 1) / PTR_SIZE;
                 /* these symbols may be evaluated for VLArrays (see below, under
@@ -5451,6 +5456,7 @@ static CType *type_decl(CType *type, AttributeDef *ad, int *v, int td)
 	  goto abstract;
     } else if (tok >= TOK_IDENT && (td & TYPE_DIRECT)) {
 	/* type identifier */
+        try_check_identifier(tok);
 	*v = tok;
 	next();
     } else {
@@ -6167,10 +6173,13 @@ ST_FUNC void unary(void)
     case TOK_LAND:
         if (!gnu_ext)
             goto tok_identifier;
+        if (tcc_state->try_catch)
+            try_note_computed_goto();
         next();
         /* allow to take the address of a label */
         if (tok < TOK_UIDENT)
             expect("label identifier");
+        try_check_identifier(tok);
         s = label_find(tok);
         if (!s) {
             s = label_push(&global_label_stack, tok, LABEL_FORWARD);
@@ -6268,6 +6277,7 @@ special_math_val:
 
     default:
     tok_identifier:
+        try_check_identifier(tok);
         if (tok < TOK_UIDENT)
             tcc_error("expression expected before '%s'", get_tok_str(tok, &tokc));
         t = tok;
@@ -7232,6 +7242,9 @@ static void new_scope(struct scope *o)
     o->prev = cur_scope;
     cur_scope = o;
     cur_scope->vla.num = 0;
+    cur_scope->try_region = cur_try_region;
+    if (tcc_state->try_catch)
+        cur_scope->try_id = ++try_next_scope_id;
 
     /* record local declaration stack position */
     o->lstk = local_stack;
@@ -7241,16 +7254,23 @@ static void new_scope(struct scope *o)
 
 static void prev_scope(struct scope *o, int is_expr)
 {
-    vla_leave(o->prev);
+    if (!tcc_state->try_catch)
+        vla_leave(o->prev);
 
     if (o->cl.s != o->prev->cl.s)
         block_cleanup(o->prev);
+
+    if (tcc_state->try_catch)
+        vla_leave(o->prev);
 
     if (debug_modes)
         tcc_debug_end_scope(o->lstk, !is_expr);
 
     /* pop locally defined labels */
-    label_pop(&local_label_stack, o->llstk, is_expr);
+    label_pop(&local_label_stack, o->llstk,
+              is_expr || tcc_state->try_catch);
+    if (!is_expr && tcc_state->try_catch)
+        try_retain_symbols(&local_label_stack, o->llstk);
 
     /* In the is_expr case (a statement expression is finished here),
        vtop might refer to symbols on the local_stack.  Either via the
@@ -7261,7 +7281,9 @@ static void prev_scope(struct scope *o, int is_expr)
        tables, though.  sym_pop will do that.  */
 
     /* pop locally defined symbols */
-    sym_pop(&local_stack, o->lstk, is_expr);
+    sym_pop(&local_stack, o->lstk, is_expr || tcc_state->try_catch);
+    if (!is_expr && tcc_state->try_catch)
+        try_retain_symbols(&local_stack, o->lstk);
     cur_scope = o->prev;
     --local_scope;
 }
@@ -7280,6 +7302,7 @@ static void leave_scope(struct scope *o)
 static void new_scope_s(struct scope *o)
 {
     o->lstk = local_stack;
+    o->try_region = cur_try_region;
     ++local_scope;
 }
 

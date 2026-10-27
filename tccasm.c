@@ -1381,6 +1381,7 @@ ST_FUNC void asm_instr(void)
                 if (tok == ':') {
                     /* goto labels */
                     next();
+                    tcc_try_note_asm_goto();
                     for (;;) {
                         Sym *csym;
                         int asmname;
@@ -1388,6 +1389,7 @@ ST_FUNC void asm_instr(void)
                           tcc_error("too many asm operands");
                         if (tok < TOK_UIDENT)
                           expect("label identifier");
+                        tcc_try_check_identifier(tok);
 			memset(operands + nb_operands + nb_labels, 0,
 			       sizeof(operands[0]));
                         operands[nb_operands + nb_labels++].id = tok;
