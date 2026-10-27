@@ -7472,6 +7472,106 @@ static struct try_region *try_new_region(struct try_block *tb, int kind)
     return r;
 }
 
+static void try_push_frame_addr(struct try_block *tb)
+{
+    CType type;
+    try_frame_type(&type);
+    vset(&type, VT_LOCAL | VT_LVAL, tb->frame_off);
+    gaddrof();
+    mk_pointer(&vtop->type);
+}
+
+static void try_push_category_addr(Sym *cat)
+{
+    vpushsym(&cat->type, cat);
+    mk_pointer(&vtop->type);
+}
+
+static void try_emit_enter(struct try_block *tb, int size, int align)
+{
+    vpush_helper_func(tok_alloc_const("__tcc_try_enter"));
+    try_push_frame_addr(tb);
+#ifdef CONFIG_TCC_BCHECK
+    vpush_helper_func(tok_alloc_const(tcc_state->do_bounds_check
+                                      ? "__bound_longjmp" : "longjmp"));
+#else
+    vpush_helper_func(tok_alloc_const("longjmp"));
+#endif
+    mk_pointer(&vtop->type);
+    vpushs(size);
+    vpushs(align);
+    vpushs(0);
+    gfunc_call(5);
+}
+
+static void try_push_int_result(void)
+{
+    CType t;
+    t.t = VT_INT;
+    t.ref = NULL;
+    vpush(&t);
+    PUT_R_RET(vtop, VT_INT);
+}
+
+static void try_emit_bound_setjmp(struct try_block *tb)
+{
+#ifdef CONFIG_TCC_BCHECK
+    if (tcc_state->do_bounds_check) {
+        vpush_helper_func(tok_alloc_const("__bound_setjmp"));
+        try_push_frame_addr(tb);
+        gfunc_call(1);
+    }
+#else
+    (void)tb;
+#endif
+}
+
+static int try_emit_setjmp(struct try_block *tb)
+{
+    CType ptype;
+
+    try_emit_bound_setjmp(tb);
+#if defined(TCC_TARGET_PE)
+# if defined(TCC_TARGET_X86_64)
+    vpush_helper_func(tok_alloc_const("_setjmp"));
+    try_push_frame_addr(tb);
+    ptype.t = VT_VOID;
+    ptype.ref = NULL;
+    mk_pointer(&ptype);
+    vset(&ptype, VT_LOCAL, 0);
+    gfunc_call(2);
+# elif defined(TCC_TARGET_ARM64)
+    vpush_helper_func(tok_alloc_const("_setjmpex"));
+    try_push_frame_addr(tb);
+    ptype.t = VT_VOID;
+    ptype.ref = NULL;
+    mk_pointer(&ptype);
+    vset(&ptype, VT_LOCAL, 0);
+    vpushi(224);
+    gen_op('+');
+    gfunc_call(2);
+# else
+    vpush_helper_func(tok_alloc_const("_setjmp"));
+    try_push_frame_addr(tb);
+    gfunc_call(1);
+# endif
+#else
+    vpush_helper_func(tok_alloc_const("setjmp"));
+    try_push_frame_addr(tb);
+    gfunc_call(1);
+#endif
+    try_push_int_result();
+    return gvtst(0, 0);
+}
+
+static void try_emit_landing(struct try_block *tb)
+{
+    vpush_helper_func(tok_alloc_const("__tcc_try_landing"));
+    try_push_frame_addr(tb);
+    gfunc_call(1);
+    try_push_int_result();
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
