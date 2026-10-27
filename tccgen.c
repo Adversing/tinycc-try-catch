@@ -8353,7 +8353,15 @@ again:
     if (debug_modes)
         tcc_tcov_check_line (tcc_state, 0), tcc_tcov_block_begin (tcc_state);
 
-    if (t == TOK_IF) {
+    if (tcc_state->try_catch && t == TOK_TRY) {
+        try_stmt();
+    } else if (tcc_state->try_catch && t == TOK_THROW) {
+        try_throw_stmt();
+    } else if (tcc_state->try_catch
+               && (t == TOK_CATCH || t == TOK_FINALLY)) {
+        tcc_error("'%s' without a matching try",
+                  get_tok_str(t, NULL));
+    } else if (t == TOK_IF) {
         new_scope_s(&o);
         skip('(');
         gexpr_decl();
@@ -8396,6 +8404,7 @@ again:
                 next();
                 if (tok < TOK_UIDENT)
                     expect("label identifier");
+                try_check_identifier(tok);
                 label_push(&local_label_stack, tok, LABEL_DECLARED);
                 next();
             } while (tok == ',');
@@ -8434,34 +8443,66 @@ again:
             tcc_warning("'return' with no value");
             b = 0;
         }
-        leave_scope(root_scope);
-        if (b)
-            gfunc_return(&func_vt);
+        if (tcc_state->try_catch && cur_try_region) {
+            if (b) {
+                if (try_return_off == 0)
+                    tcc_error("internal: missing return slot");
+                vset(&func_vt, VT_LOCAL | VT_LVAL, try_return_off);
+                vswap();
+                vstore();
+                vpop();
+            }
+            try_emit_exit(cur_try_region, NULL, 1, -1, NULL,
+                          root_scope->cl.s, try_save_scope(root_scope),
+                          try_save_scope(cur_scope));
+        } else {
+            leave_scope(root_scope);
+            if (b)
+                gfunc_return(&func_vt);
+        }
         skip(';');
         /* jump unless last stmt in top-level block */
-        if (tok != '}' || local_scope != 1)
+        if ((tok != '}' || local_scope != 1)
+            && !(tcc_state->try_catch && cur_try_region))
             rsym = gjmp(rsym);
         if (debug_modes)
 	    tcc_tcov_block_end (tcc_state, -1);
         CODE_OFF();
 
     } else if (t == TOK_BREAK) {
+        struct scope *ts;
         /* compute jump */
         if (!cur_scope->bsym)
             tcc_error("cannot break");
         if (cur_switch && cur_scope->bsym == cur_switch->bsym)
-            leave_scope(cur_switch->scope);
+            ts = cur_switch->scope;
         else
-            leave_scope(loop_scope);
-        *cur_scope->bsym = gjmp(*cur_scope->bsym);
+            ts = loop_scope;
+        if (tcc_state->try_catch && try_func_used) {
+            try_emit_exit(cur_try_region, ts ? ts->try_region : NULL,
+                          0, -1, cur_scope->bsym,
+                          ts ? ts->cl.s : NULL, try_save_scope(ts),
+                          try_save_scope(cur_scope));
+        } else {
+            leave_scope(ts);
+            *cur_scope->bsym = gjmp(*cur_scope->bsym);
+        }
         skip(';');
 
     } else if (t == TOK_CONTINUE) {
         /* compute jump */
         if (!cur_scope->csym)
             tcc_error("cannot continue");
-        leave_scope(loop_scope);
-        *cur_scope->csym = gjmp(*cur_scope->csym);
+        if (tcc_state->try_catch && try_func_used) {
+            try_emit_exit(cur_try_region,
+                          loop_scope ? loop_scope->try_region : NULL,
+                          0, -1, cur_scope->csym,
+                          loop_scope ? loop_scope->cl.s : NULL,
+                          try_save_scope(loop_scope), try_save_scope(cur_scope));
+        } else {
+            leave_scope(loop_scope);
+            *cur_scope->csym = gjmp(*cur_scope->csym);
+        }
         skip(';');
 
     } else if (t == TOK_FOR) {
@@ -8521,6 +8562,7 @@ again:
         sw = tcc_mallocz(sizeof *sw);
         sw->bsym = &a;
         sw->scope = cur_scope;
+        sw->try_region = cur_try_region;
         sw->prev = cur_switch;
         sw->nocode_wanted = nocode_wanted;
         cur_switch = sw;
@@ -8560,6 +8602,7 @@ again:
         struct case_t *cr;
         if (!cur_switch)
             expect("switch");
+        try_check_switch_label(t);
         cr = tcc_malloc(sizeof(struct case_t));
         dynarray_add(&cur_switch->p, &cur_switch->n, cr);
         t = cur_switch->sv.type.t;
@@ -8580,6 +8623,7 @@ again:
     } else if (t == TOK_DEFAULT) {
         if (!cur_switch)
             expect("switch");
+        try_check_switch_label(t);
         if (cur_switch->def_sym)
             tcc_error("too many 'default'");
         cur_switch->def_sym = cur_switch->nocode_wanted ? -1 : gind();
@@ -8587,9 +8631,12 @@ again:
         goto block_after_label;
 
     } else if (t == TOK_GOTO) {
-        vla_restore(cur_scope->vla.locorig);
+        if (!tcc_state->try_catch || (tok == '*' && gnu_ext))
+            vla_restore(cur_scope->vla.locorig);
         if (tok == '*' && gnu_ext) {
             /* computed goto */
+            if (tcc_state->try_catch)
+                try_note_computed_goto();
             next();
             gexpr();
             if ((vtop->type.t & VT_BTYPE) != VT_PTR)
@@ -8597,6 +8644,7 @@ again:
             ggoto();
 
         } else if (tok >= TOK_UIDENT) {
+            try_check_identifier(tok);
 	    s = label_find(tok);
 	    /* put forward definition if needed */
             if (!s)
@@ -8604,7 +8652,23 @@ again:
             else if (s->r == LABEL_DECLARED)
               s->r = LABEL_FORWARD;
 
-	    if (s->r & LABEL_FORWARD) {
+            if (tcc_state->try_catch) {
+                if (s->r & LABEL_FORWARD) {
+                    struct try_pending_goto *pg;
+                    pg = tcc_mallocz(sizeof *pg);
+                    pg->next = try_pending_gotos;
+                    try_pending_gotos = pg;
+                    pg->jmp = gjmp(0);
+                    pg->label = s;
+                    pg->from = cur_try_region;
+                    pg->scope = try_save_scope(cur_scope);
+                    CODE_OFF();
+                } else {
+                    try_emit_exit(cur_try_region, s->try_region,
+                                  0, s->jind, NULL, s->cleanupstate,
+                                  s->try_scope, try_save_scope(cur_scope));
+                }
+            } else if (s->r & LABEL_FORWARD) {
 		/* start new goto chain for cleanups, linked via label->next */
 		if (cur_scope->cl.s && !nocode_wanted) {
                     sym_push2(&pending_gotos, SYM_FIELD, 0, cur_scope->cl.n);
@@ -8630,6 +8694,7 @@ again:
     } else {
         if (tok == ':' && t >= TOK_UIDENT) {
             /* label case */
+            try_check_identifier(t);
 	    next();
             s = label_find(t);
             if (s) {
@@ -8647,6 +8712,9 @@ again:
                 s = label_push(&global_label_stack, t, LABEL_DEFINED);
             }
             s->jind = gind();
+            s->try_region = cur_try_region;
+            if (tcc_state->try_catch)
+                s->try_scope = try_save_scope(cur_scope);
             s->cleanupstate = cur_scope->cl.s;
 
     block_after_label:
