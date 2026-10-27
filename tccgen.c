@@ -532,6 +532,7 @@ ST_FUNC void tccgen_finish(TCCState *s1)
 {
     tcc_debug_end(s1); /* just in case of errors: free memory */
     free_inline_functions(s1);
+    try_function_cleanup();
     sym_pop(&global_stack, NULL, 0);
     sym_pop(&local_stack, NULL, 0);
     /* free preprocessor macros */
@@ -8173,6 +8174,145 @@ static void try_throw_stmt(void)
     skip(';');
 }
 
+/* emit the finish trampoline for one construct; called at function end */
+static void try_emit_finish(struct try_block *tb)
+{
+    struct try_exit *ex;
+
+    if (tb->finish_jmp) {
+        gsym(tb->finish_jmp);
+        tb->finish_jmp = 0;
+    } else {
+        gind();
+    }
+
+    try_emit_call_frame(tb, "__tcc_try_finish");
+    try_push_int_result();
+    for (ex = tb->exits; ex; ex = ex->next) {
+        int j;
+        vdup();
+        vpushi(ex->id);
+        gen_op(TOK_EQ);
+        j = gvtst(0, 0);
+        gsym_addr(j, ex->cont_addr);
+    }
+    vpop();
+    gjmp_addr(tb->after_addr);
+    CODE_OFF();
+}
+
+static void try_emit_pending_gotos(void)
+{
+    struct try_pending_goto *pg;
+    for (pg = try_pending_gotos; pg; pg = pg->next) {
+        int stub;
+        if (pg->label->r != LABEL_DEFINED && pg->label->r != LABEL_GONE)
+            tcc_error("undefined label '%s'",
+                      get_tok_str(pg->label->v, NULL));
+        stub = gind();
+        gsym_addr(pg->jmp, stub);
+        if (pg->label->try_region
+            && !try_region_ancestor(pg->from, pg->label->try_region))
+            tcc_error("goto enters a protected try/catch/finally region");
+        try_emit_exit(pg->from, pg->label->try_region, 0,
+                      pg->label->jind, NULL, pg->label->cleanupstate,
+                      pg->label->try_scope, pg->scope);
+    }
+}
+
+static void try_function_begin(void)
+{
+    CType type;
+    int size, align;
+
+    cur_try = NULL;
+    cur_try_region = NULL;
+    all_tries = all_tries_tail = NULL;
+    try_pending_gotos = NULL;
+    cur_catch_lex = NULL;
+    try_next_exit_id = 1;
+    try_return_off = 0;
+    try_func_used = 0;
+    try_func_unsupported = 0;
+    try_void_return_jmp = 0;
+    try_next_scope_id = 0;
+    root_scope->try_id = ++try_next_scope_id;
+
+    if (!tcc_state->try_catch)
+        return;
+    type = func_vt;
+    if ((type.t & VT_BTYPE) != VT_VOID) {
+        size = type_size(&type, &align);
+        try_return_off = try_alloc_local(size, align);
+    }
+}
+
+static void try_function_end(void)
+{
+    struct try_block *tb;
+
+    if (!tcc_state->try_catch)
+        return;
+
+    if (try_func_used || try_pending_gotos) {
+        int skip = gjmp(0);
+        gind();
+        try_emit_pending_gotos();
+        for (tb = all_tries; tb; tb = tb->all_next)
+            try_emit_finish(tb);
+        gsym(try_void_return_jmp);
+        gsym(skip);
+    }
+
+    try_function_cleanup();
+}
+
+static void try_function_cleanup(void)
+{
+    struct try_block *tb;
+
+    while (all_tries) {
+        struct try_catch_info *ci;
+        struct try_exit *ex;
+        struct try_region *r;
+
+        tb = all_tries;
+        all_tries = tb->all_next;
+        while ((ci = tb->catches) != NULL) {
+            tb->catches = ci->next;
+            tcc_free(ci);
+        }
+        while ((ex = tb->exits) != NULL) {
+            tb->exits = ex->next;
+            tcc_free(ex);
+        }
+        while ((r = tb->regions) != NULL) {
+            tb->regions = r->all_next;
+            tcc_free(r);
+        }
+        tcc_free(tb);
+    }
+    while (try_pending_gotos) {
+        struct try_pending_goto *pg = try_pending_gotos;
+        try_pending_gotos = pg->next;
+        tcc_free(pg);
+    }
+    while (try_scopes) {
+        struct try_scope *s = try_scopes;
+        try_scopes = s->all_next;
+        tcc_free(s);
+    }
+    while (try_saved_symbols) {
+        Sym *s = try_saved_symbols;
+        try_saved_symbols = s->prev;
+        sym_free(s);
+    }
+    all_tries_tail = NULL;
+    cur_try = NULL;
+    cur_try_region = NULL;
+    cur_catch_lex = NULL;
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
@@ -9624,9 +9764,11 @@ static void gen_function(Sym *sym)
     gfunc_prolog(sym);
     tcc_debug_prolog_epilog(tcc_state, 0);
     func_vla_arg(sym);
+    try_function_begin();
     block(0);
     gsym(rsym);
     nocode_wanted = 0;
+    try_function_end();
     tcc_debug_end_scope(NULL, !func_var);
     tcc_debug_prolog_epilog(tcc_state, 1);
     gfunc_epilog();
