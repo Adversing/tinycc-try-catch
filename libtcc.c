@@ -1726,6 +1726,7 @@ static const FlagDef options_f[] = {
     { offsetof(TCCState, reverse_funcargs), 0, "reverse-funcargs" },
     { offsetof(TCCState, gnu89_inline), 0, "gnu89-inline" },
     { offsetof(TCCState, unwind_tables), 0, "asynchronous-unwind-tables" },
+    { offsetof(TCCState, try_catch), 0, "try-catch" },
     { 0, 0, NULL }
 };
 

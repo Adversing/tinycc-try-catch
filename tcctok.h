@@ -440,3 +440,12 @@
 #if defined TCC_TARGET_RISCV64
 #include "riscv64-tok.h"
 #endif
+
+/*********************************************************************/
+/* try/catch/finally extension keywords.
+   These are placed after TOK_UIDENT so that, when the extension is
+   disabled, they remain ordinary identifiers. */
+     DEF(TOK_TRY, "try")
+     DEF(TOK_CATCH, "catch")
+     DEF(TOK_THROW, "throw")
+     DEF(TOK_FINALLY, "finally")
