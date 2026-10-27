@@ -161,3 +161,80 @@ void __tcc_try_shutdown(void)
 /* ------------------------------------------------------------------------- */
 /* exception objects */
 
+static void exc_retain(struct __tcc_try_exception *e)
+{
+    if (e->refs != TCC_EXC_IMMORTAL)
+        ++e->refs;
+}
+
+static void exc_release(struct __tcc_try_exception *e)
+{
+    if (!e || e->refs == TCC_EXC_IMMORTAL)
+        return;
+    if (--e->refs == 0)
+        free(e->alloc_base);
+}
+
+static struct __tcc_try_exception *exc_new(const struct tcc_exception_type *type,
+                                           const void *payload,
+                                           size_t size,
+                                           const char *file,
+                                           int line)
+{
+    struct __tcc_try_exception *e;
+    char *p;
+    size_t total;
+
+    total = sizeof *e + TCC_EXC_ALIGN - 1 + size;
+    if (total < sizeof *e || total < size)
+        return NULL;
+    e = (struct __tcc_try_exception *)malloc(total);
+    if (!e)
+        return NULL;
+    memset(e, 0, sizeof *e);
+    e->refs = 1;
+    e->alloc_base = e;
+    e->view.type = type;
+    e->view.payload_size = size;
+    e->view.file = file;
+    e->view.line = line;
+    if (size) {
+        p = (char *)(e + 1);
+        p = (char *)(((size_t)p + TCC_EXC_ALIGN - 1) & ~(size_t)(TCC_EXC_ALIGN - 1));
+        memcpy(p, payload, size);
+        e->view.payload = p;
+    }
+    return e;
+}
+
+static struct __tcc_try_exception *invalid_exception(const char *file, int line)
+{
+    struct __tcc_try_exception *e;
+    e = exc_new(&TCC_InvalidException, NULL, 0, file, line);
+    return e ? e : &emergency_invalid;
+}
+
+/* Validate an immutable category chain without an arbitrary depth limit. */
+static int valid_category(const struct tcc_exception_type *type)
+{
+    const struct tcc_exception_type *slow, *fast, *p;
+
+    if (!type)
+        return 0;
+    if (type == &TCC_Exception)
+        return 1;
+
+    slow = type;
+    fast = type;
+    while (fast && fast->parent) {
+        slow = slow->parent;
+        fast = fast->parent->parent;
+        if (slow == fast)
+            return 0;
+    }
+    for (p = type; p; p = p->parent)
+        if (p == &TCC_Exception)
+            return 1;
+    return 0;
+}
+
