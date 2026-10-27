@@ -7323,6 +7323,59 @@ static void gexpr_decl(void)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* try/catch/finally code generation */
+
+static int try_is_keyword(int t)
+{
+    return t == TOK_TRY || t == TOK_CATCH
+        || t == TOK_THROW || t == TOK_FINALLY;
+}
+
+static void try_check_identifier(int t)
+{
+    if (tcc_state->try_catch && try_is_keyword(t))
+        tcc_error("'%s' is reserved by -ftry-catch",
+                  get_tok_str(t, NULL));
+}
+
+ST_FUNC void tcc_try_check_identifier(int t)
+{
+    try_check_identifier(t);
+}
+
+ST_FUNC void tcc_try_note_asm_goto(void)
+{
+    if (!tcc_state->try_catch)
+        return;
+    if (try_func_used)
+        tcc_error("asm goto is not supported in a function that uses "
+                  "try/catch/finally");
+    try_func_unsupported |= 2;
+}
+
+static void try_note_computed_goto(void)
+{
+    if (try_func_used)
+        tcc_error("computed goto is not supported in a function that uses "
+                  "try/catch/finally");
+    try_func_unsupported |= 1;
+}
+
+static void try_reject_unsupported(void)
+{
+    if (try_func_unsupported)
+        tcc_error("try/catch/finally is not supported in a function that "
+                  "uses computed goto or asm goto");
+}
+
+static void try_check_switch_label(int t)
+{
+    if (tcc_state->try_catch && cur_try_region != cur_switch->try_region)
+        tcc_error("'%s' label enters a protected try/catch/finally region",
+                  get_tok_str(t, NULL));
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
