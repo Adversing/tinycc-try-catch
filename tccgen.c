@@ -8091,7 +8091,86 @@ static void try_throw_stmt(void)
         return;
     }
 
-    expect("';' after exception category");
+    if (tok != ',')
+        expect("',' or ';' after exception category");
+    next();
+
+    vpush_helper_func(tok_alloc_const("__tcc_throw_new"));
+    try_push_category_addr(cat);
+    expr_eq(); /* source address */
+
+    {
+        CType *st = &vtop->type;
+        int bt = st->t & VT_BTYPE;
+        if (bt == VT_FUNC)
+            tcc_error("payload source cannot be a function pointer");
+        if (is_float(st->t))
+            tcc_error("payload source must be an object pointer or null");
+        if (is_integer_btype(bt)) {
+            if ((vtop->r & (VT_VALMASK | VT_LVAL)) != VT_CONST
+                || vtop->c.i != 0)
+                tcc_error("payload source must be a pointer or a null "
+                          "pointer constant");
+        } else if (bt == VT_PTR) {
+            CType *pt = pointed_type(st);
+            if ((pt->t & VT_BTYPE) == VT_FUNC)
+                tcc_error("payload source cannot be a function pointer");
+        } else {
+            tcc_error("payload source must be an object pointer or null");
+        }
+    }
+
+    /* expr_eq() may leave an lvalue. Snapshot it before the size expression
+       can modify the pointer, including through an escaped alias. */
+    vptr.t = VT_VOID;
+    vptr.ref = NULL;
+    mk_pointer(&vptr);
+    gen_cast(&vptr);
+    gv(RC_INT);
+    skip(',');
+    expr_eq(); /* byte count */
+    if (!is_integer_btype(vtop->type.t & VT_BTYPE))
+        tcc_error("payload size must have integer type");
+    is_signed = !(vtop->type.t & VT_UNSIGNED);
+    if ((vtop->r & (VT_VALMASK | VT_LVAL)) == VT_CONST && is_signed) {
+        long long size_value;
+
+        switch (vtop->type.t & VT_BTYPE) {
+        case VT_BYTE:
+            size_value = (signed char)vtop->c.i;
+            break;
+        case VT_SHORT:
+            size_value = (short)vtop->c.i;
+            break;
+        case VT_INT:
+            size_value = (int)vtop->c.i;
+            break;
+        default:
+            size_value = (long long)vtop->c.i;
+            break;
+        }
+        if (size_value < 0)
+            tcc_error("payload size is negative");
+    }
+
+    vptr.t = VT_VOID;
+    vptr.ref = NULL;
+    mk_pointer(&vptr);
+    ull.t = VT_LLONG | VT_UNSIGNED;
+    ull.ref = NULL;
+
+    gen_cast(&ull);
+    vswap();
+    if ((vtop->type.t & VT_BTYPE) == VT_PTR)
+        gen_cast(&vptr);
+    vswap();
+
+    vpushi(is_signed);
+    try_push_file_string();
+    vpushi(line);
+    gfunc_call(6);
+    CODE_OFF();
+    skip(';');
 }
 
 static void block(int flags)
