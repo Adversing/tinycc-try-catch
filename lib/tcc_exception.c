@@ -422,3 +422,42 @@ void __tcc_try_rethrow(struct __tcc_try_frame *frame)
     throw_current(e);
 }
 
+void __tcc_throw_new(const struct tcc_exception_type *type,
+                     const void *payload,
+                     unsigned long long size,
+                     int size_is_signed,
+                     const char *file,
+                     int line)
+{
+    struct __tcc_try_exception *e;
+    size_t sz;
+
+    if (!valid_category(type)) {
+        e = invalid_exception(file, line);
+        throw_current(e);
+    }
+
+    if (size_is_signed && (long long)size < 0) {
+        e = invalid_exception(file, line);
+        throw_current(e);
+    }
+    if (size > (unsigned long long)(size_t)-1) {
+        e = invalid_exception(file, line);
+        throw_current(e);
+    }
+    sz = (size_t)size;
+    if (sz != 0 && payload == NULL) {
+        e = invalid_exception(file, line);
+        throw_current(e);
+    }
+    if (sz > (size_t)-1
+             - (sizeof(struct __tcc_try_exception) + TCC_EXC_ALIGN - 1)) {
+        e = invalid_exception(file, line);
+        throw_current(e);
+    }
+
+    e = exc_new(type, payload, sz, file, line);
+    if (!e)
+        e = &emergency_oom;
+    throw_current(e);
+}
