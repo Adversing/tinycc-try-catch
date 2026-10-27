@@ -7134,20 +7134,24 @@ static void save_lvalues(void)
     }
 }
 
+static void try_call_one_cleanup(Sym *cls)
+{
+    Sym *fs = cls->cleanup_func;
+    Sym *vs = cls->cleanup_sym;
+    save_lvalues();
+    vpushsym(&fs->type, fs);
+    vset(&vs->type, vs->r, vs->c);
+    vtop->sym = vs;
+    mk_pointer(&vtop->type);
+    gaddrof();
+    gfunc_call(1);
+}
+
 static void try_call_scope_cleanup(Sym *stop)
 {
     Sym *cls = cur_scope->cl.s;
-    for (; cls != stop; cls = cls->next) {
-	Sym *fs = cls->cleanup_func;
-	Sym *vs = cls->cleanup_sym;
-	save_lvalues();
-	vpushsym(&fs->type, fs);
-	vset(&vs->type, vs->r, vs->c);
-	vtop->sym = vs;
-        mk_pointer(&vtop->type);
-	gaddrof();
-	gfunc_call(1);
-    }
+    for (; cls != stop; cls = cls->next)
+        try_call_one_cleanup(cls);
 }
 
 
