@@ -45,6 +45,10 @@ static LONG WINAPI catch_sig(EXCEPTION_POINTERS *ex)
   return _XcptFilter(ex->ExceptionRecord->ExceptionCode, ex);
 }
 
+/* Weak so executables which do not use try/catch do not pull in the
+   exception runtime.  The runtime keeps per-thread state in a TLS key. */
+__attribute__((weak)) extern void __tcc_try_shutdown(void);
+
 void _tstart(void)
 {
     int ret;
@@ -61,9 +65,18 @@ void _tstart(void)
 #endif
 
     __tgetmainargs( &__argc, &__targv, &_tenviron, _dowildcard, &start_info);
+    /* Registered before user callbacks, so atexit's LIFO order runs it
+       after them and they can still use try/catch. */
+    if (__tcc_try_shutdown) {
+        atexit(__tcc_try_shutdown);
+        /* User callbacks may execute instrumented exception code. Keep
+           its support runtimes alive until those callbacks have finished. */
+        atexit(run_dtors);
+    }
     run_ctors(__argc, __targv, _tenviron);
     ret = _tmain(__argc, __targv, _tenviron);
-    run_dtors();
+    if (!__tcc_try_shutdown)
+        run_dtors();
     exit(ret);
 }
 
