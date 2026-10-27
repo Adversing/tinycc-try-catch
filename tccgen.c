@@ -7842,6 +7842,128 @@ static void try_emit_catches(struct try_block *tb)
     tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
 }
 
+static void try_stmt(void)
+{
+    struct try_block *tb;
+    struct try_region *saved_region;
+    struct try_catch_info *catch_tail = NULL;
+    CType ftype;
+    Sym *fts, *cts;
+    int fsize, falign, j, catch_count = 0, seen_ellipsis = 0;
+    int has_finally = 0;
+    int has_normal;
+
+    try_reject_unsupported();
+    fts = try_tag("__tcc_try_frame_type");
+    cts = try_tag("__tcc_exception_type");
+    (void)cts;
+    ftype.t = fts->type.t;
+    ftype.ref = fts;
+    fsize = type_size(&ftype, &falign);
+
+    tb = tcc_mallocz(sizeof *tb);
+    if (all_tries_tail)
+        all_tries_tail->all_next = tb;
+    else
+        all_tries = tb;
+    all_tries_tail = tb;
+    tb->prev = cur_try;
+    tb->outer = cur_try_region;
+    tb->frame_off = try_alloc_local(fsize, falign);
+    tb->body = try_new_region(tb, TRY_REGION_BODY);
+    tb->land_jmp = 0;
+
+    cur_try = tb;
+    try_func_used = 1;
+
+    try_emit_enter(tb, fsize, falign);
+    tb->land_jmp = try_emit_setjmp(tb);
+
+    saved_region = cur_try_region;
+    cur_try_region = tb->body;
+    if (tok != '{')
+        expect("'{'");
+    block(0);
+    cur_try_region = saved_region;
+    if (!(nocode_wanted & CODE_OFF_BIT)) {
+        j = gjmp(0);
+        tb->body_done_jmp = gjmp_append(j, tb->body_done_jmp);
+    }
+    CODE_OFF();
+
+    if (tok == TOK_FINALLY) {
+        has_finally = 1;
+        tb->has_finally = 1;
+        next();
+        if (tok != '{')
+            expect("'{'");
+    }
+
+    if (!catch_count && !has_finally)
+        tcc_error("try requires catch or finally");
+
+    tb->has_catch = catch_count != 0;
+
+    /* landing dispatch (needs the catch labels and the finally entry) */
+    try_emit_catches(tb);
+
+    if (has_finally) {
+        struct try_region *freg;
+
+        freg = try_new_region(tb, TRY_REGION_FINALLY);
+        tb->finally_entry = gind();
+        if (tb->finally_jmp)
+            gsym(tb->finally_jmp);
+        tb->finally_jmp = 0;
+
+        saved_region = cur_try_region;
+        cur_try_region = freg;
+        block(0);
+        cur_try_region = saved_region;
+
+        if (!(nocode_wanted & CODE_OFF_BIT)) {
+            j = gjmp(0);
+            tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
+        }
+        CODE_OFF();
+        if (tok == TOK_CATCH)
+            tcc_error("catch after finally");
+        if (tok == TOK_FINALLY)
+            tcc_error("duplicate finally");
+    } else if (tb->finally_jmp) {
+        /* exits emitted before 'finally' was seen still need the finish
+           trampoline to pop the frame and resume at their continuation. */
+        tb->finish_jmp = gjmp_append(tb->finally_jmp, tb->finish_jmp);
+        tb->finally_jmp = 0;
+    }
+
+    has_normal = tb->body_done_jmp != 0;
+    if (tb->body_done_jmp) {
+        gsym(tb->body_done_jmp);
+        tb->body_done_jmp = 0;
+    } else {
+        gind();
+    }
+    tb->body_done_addr = ind;
+
+    if (has_finally) {
+        try_emit_normal(tb);
+        gjmp_addr(tb->finally_entry);
+        CODE_OFF();
+    } else {
+        j = gjmp(0);
+        tb->finish_jmp = gjmp_append(j, tb->finish_jmp);
+        CODE_OFF();
+    }
+
+    tb->after_addr = gind();
+    if (!has_normal)
+        CODE_OFF();
+    tb->completed = 1;
+    cur_try = tb->prev;
+    cur_try_region = tb->outer;
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
