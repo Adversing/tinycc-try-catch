@@ -7572,6 +7572,56 @@ static void try_emit_landing(struct try_block *tb)
     try_push_int_result();
 }
 
+static void try_emit_match(struct try_block *tb, Sym *cat, int any)
+{
+    vpush_helper_func(tok_alloc_const(any ? "__tcc_try_match_any"
+                                          : "__tcc_try_match"));
+    try_push_frame_addr(tb);
+    if (!any)
+        try_push_category_addr(cat);
+    gfunc_call(any ? 1 : 2);
+    try_push_int_result();
+}
+
+static void try_emit_bind(struct try_block *tb, int off)
+{
+    CType ptype;
+    ptype.t = VT_VOID;
+    ptype.ref = NULL;
+    mk_pointer(&ptype);
+    vpush_helper_func(tok_alloc_const("__tcc_try_bind"));
+    try_push_frame_addr(tb);
+    vset(&ptype, VT_LOCAL | VT_LVAL, off);
+    gaddrof();
+    gfunc_call(2);
+}
+
+static void try_emit_call_frame(struct try_block *tb, const char *name)
+{
+    vpush_helper_func(tok_alloc_const(name));
+    try_push_frame_addr(tb);
+    gfunc_call(1);
+}
+
+static void try_emit_normal(struct try_block *tb)
+{
+    try_emit_call_frame(tb, "__tcc_try_normal");
+}
+
+static void try_emit_rethrow(struct try_block *tb)
+{
+    try_emit_call_frame(tb, "__tcc_try_rethrow");
+}
+
+static void try_emit_begin_finally(struct try_block *tb, int action, int id)
+{
+    vpush_helper_func(tok_alloc_const("__tcc_try_begin_finally"));
+    try_push_frame_addr(tb);
+    vpushi(action);
+    vpushi(id);
+    gfunc_call(3);
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
