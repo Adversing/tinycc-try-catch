@@ -8029,6 +8029,71 @@ static void try_stmt(void)
     cur_try_region = tb->outer;
 }
 
+static struct try_block *try_block_by_frame(int off)
+{
+    struct try_block *tb;
+    for (tb = cur_try; tb; tb = tb->prev)
+        if (tb->frame_off == off)
+            return tb;
+    return NULL;
+}
+
+static void try_push_file_string(void)
+{
+    Section *sec = rodata_section;
+    int len = strlen(file->filename) + 1;
+    size_t off = sec->data_offset;
+    char *p = section_ptr_add(sec, len);
+    memcpy(p, file->filename, len);
+    vpush_ref(&char_pointer_type, sec, off, len);
+}
+
+static void try_throw_stmt(void)
+{
+    struct try_catch_lex *cl;
+    Sym *cat;
+    CType ull, vptr;
+    int is_signed, line = file->line_num;
+
+    try_reject_unsupported();
+    try_func_used = 1;
+
+    if (tok == ';') {
+        struct try_block *tb;
+        cl = cur_catch_lex;
+        if (!cl)
+            tcc_error("'throw;' outside of a catch block");
+        /* find the construct that owns this lexical catch */
+        tb = try_block_by_frame(cl->frame_off);
+        if (!tb)
+            tcc_error("'throw;' outside of a catch block");
+        try_emit_rethrow(tb);
+        CODE_OFF();
+        skip(';');
+        return;
+    }
+
+    cat = try_parse_category();
+    if (tok == ';') {
+        vptr.t = VT_VOID;
+        vptr.ref = NULL;
+        mk_pointer(&vptr);
+        vpush_helper_func(tok_alloc_const("__tcc_throw_new"));
+        try_push_category_addr(cat);
+        vpushi(0);
+        vpushll(0);
+        vpushi(0);
+        try_push_file_string();
+        vpushi(line);
+        gfunc_call(6);
+        CODE_OFF();
+        skip(';');
+        return;
+    }
+
+    expect("';' after exception category");
+}
+
 static void block(int flags)
 {
     int a, b, c, d, e, t;
