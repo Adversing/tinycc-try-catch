@@ -168,8 +168,14 @@ LIBTCCAPI int tcc_relocate(TCCState *s1)
     if (ptr_diff < 0)
         return -1;
     ret = tcc_relocate_ex(s1, s1->run_ptr, ptr_diff);
-    if (ret == 0)
+    if (ret == 0) {
         st_link(s1);
+        /* resolve while the runtime is mapped and settled. This cannot be
+           looked up after the generated program has run: tcc_get_symbol()
+           walks the ELF symbol table which the program may have clobbered. */
+        s1->run_try_shutdown = (void (*)(void))
+            tcc_get_symbol(s1, "__tcc_try_shutdown");
+    }
     return ret;
 }
 
@@ -178,6 +184,13 @@ ST_FUNC void tcc_run_free(TCCState *s1)
     unsigned size;
     void *ptr;
     int i;
+
+    /* release the exception runtime's thread-local state before the
+       generated code (including the runtime itself) is unmapped */
+    if (s1->run_try_shutdown) {
+        s1->run_try_shutdown();
+        s1->run_try_shutdown = NULL;
+    }
 
     /* free any loaded DLLs */
     for ( i = 0; i < s1->nb_loaded_dlls; i++) {
