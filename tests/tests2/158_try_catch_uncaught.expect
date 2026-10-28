@@ -1,0 +1,2 @@
+finalizers=2
+tcc: uncaught exception 'test.uncaught' at 158_try_catch_uncaught.c:13
