@@ -42,6 +42,7 @@ ifeq (,$(filter i386 x86_64,$(ARCH)))
 endif
 ifeq ($(OS),Windows_NT) # for libtcc_test to find libtcc.dll
  PATH := $(CURDIR)/$(TOP)$(if $(findstring ;,$(PATH)),;,:)$(PATH)
+ TESTS += libtcc-exceptions
 endif
 ifdef CONFIG_OSX
 LIBS += $(LINK_LIBTCC)
@@ -102,6 +103,12 @@ libtcc_test$(EXESUF): libtcc_test.c
 	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
 
 libtcc_test_mt$(EXESUF): libtcc_test_mt.c
+	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
+
+libtcc-exceptions: libtcc_exception_test$(EXESUF)
+	./libtcc_exception_test$(EXESUF) $(TOPSRC)/tests/try_catch_ownership.c $(TCCFLAGS)
+
+libtcc_exception_test$(EXESUF): libtcc_exception_test.c
 	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
 
 %-dir:
