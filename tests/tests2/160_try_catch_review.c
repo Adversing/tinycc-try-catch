@@ -301,6 +301,38 @@ before_vla_done:
     CHECK(a[n - 1] == 42);
 }
 
+static int *alias_pointer;
+static size_t change_source(void)
+{
+    *(&alias_pointer) = NULL;
+    return sizeof(int);
+}
+
+static void operands(void)
+{
+    int a = 11, b = 22, got = 0;
+    int *p = &a;
+    int **escaped = &p;
+
+    try { throw E, p, (p = &b, sizeof a); }
+    catch (E e) {
+        memcpy(&got, e.payload, sizeof got);
+        CHECK(got == 11);
+    }
+    p = &a;
+    try { throw E, p, (*escaped = NULL, sizeof a); }
+    catch (E e) {
+        memcpy(&got, e.payload, sizeof got);
+        CHECK(got == 11);
+    }
+    alias_pointer = &a;
+    try { throw E, alias_pointer, change_source(); }
+    catch (E e) {
+        memcpy(&got, e.payload, sizeof got);
+        CHECK(got == 11 && alias_pointer == NULL);
+    }
+}
+
 static void fresh_throw(void)
 {
     int caught = 0;
@@ -316,6 +348,7 @@ int main(int argc, char **argv)
     if (all || strcmp(argv[1], "cleanup") == 0) { cleanup(); fresh_throw(); }
     if (all || strcmp(argv[1], "labels") == 0) { labels(); fresh_throw(); }
     if (all || strcmp(argv[1], "vla") == 0) { vla(); fresh_throw(); }
+    if (all || strcmp(argv[1], "operands") == 0) { operands(); fresh_throw(); }
     printf("try/catch review failures=%d\n", failures);
     return failures != 0;
 }
