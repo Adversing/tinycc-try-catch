@@ -88,4 +88,103 @@ int main(void)
     return 0;
 }
 
+#elif defined test_keyword_var
+#include <tcc_exception.h>
+int try;
+int main(void)
+{
+    return 0;
+}
+
+#elif defined test_keyword_member
+#include <tcc_exception.h>
+struct S {
+    int catch;
+};
+int main(void)
+{
+    return 0;
+}
+
+#elif defined test_keyword_tag
+#include <tcc_exception.h>
+struct finally {
+    int x;
+};
+int main(void)
+{
+    return 0;
+}
+
+#elif defined test_keyword_label
+#include <tcc_exception.h>
+int main(void)
+{
+finally:
+    return 0;
+}
+
+#elif defined test_keyword_param
+#include <tcc_exception.h>
+int f(int throw)
+{
+    return throw;
+}
+int main(void)
+{
+    return f(0);
+}
+
+#elif defined test_keyword_enum
+#include <tcc_exception.h>
+enum { throw = 1 };
+int main(void)
+{
+    return throw - 1;
+}
+
+#elif defined test_missing_header
+struct tcc_exception_type {
+    const struct tcc_exception_type *parent;
+    const char *name;
+};
+static const struct tcc_exception_type E = { 0, "e" };
+int main(void)
+{
+    try {
+    }
+    finally {
+    }
+    return 0;
+}
+
+#elif defined test_computed_goto
+#include <tcc_exception.h>
+int main(void)
+{
+    void *p = &&target;
+    try {
+    }
+    finally {
+    }
+target:
+    return p != 0;
+}
+
+#elif defined test_throw_negative_size
+#include <tcc_exception.h>
+static const struct tcc_exception_type E = { &TCC_Exception, "e" };
+int main(void)
+{
+    int x;
+    throw E, &x, -1;
+    return 0;
+}
+
+#elif defined test_throw_expr
+#include <tcc_exception.h>
+int main(void)
+{
+    return try;
+}
 #endif

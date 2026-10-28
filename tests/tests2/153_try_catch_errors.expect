@@ -18,3 +18,33 @@
 
 [test_finally_break]
 153_try_catch_errors.c:85: error: control cannot leave a finally block
+
+[test_keyword_var]
+153_try_catch_errors.c:93: error: 'try' is reserved by -ftry-catch
+
+[test_keyword_member]
+153_try_catch_errors.c:102: error: 'catch' is reserved by -ftry-catch
+
+[test_keyword_tag]
+153_try_catch_errors.c:111: error: 'finally' is reserved by -ftry-catch
+
+[test_keyword_label]
+153_try_catch_errors.c:123: error: 'finally' without a matching try
+
+[test_keyword_param]
+153_try_catch_errors.c:129: error: 'throw' is reserved by -ftry-catch
+
+[test_keyword_enum]
+153_try_catch_errors.c:140: error: 'throw' is reserved by -ftry-catch
+
+[test_missing_header]
+153_try_catch_errors.c:154: error: try/catch/finally requires #include <tcc_exception.h>
+
+[test_computed_goto]
+153_try_catch_errors.c:166: error: try/catch/finally is not supported in a function that uses computed goto or asm goto
+
+[test_throw_negative_size]
+153_try_catch_errors.c:180: error: payload size is negative
+
+[test_throw_expr]
+153_try_catch_errors.c:188: error: 'try' is reserved by -ftry-catch
