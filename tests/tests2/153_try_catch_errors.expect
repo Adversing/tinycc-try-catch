@@ -1,0 +1,20 @@
+[test_try_only]
+153_try_catch_errors.c:10: error: try requires catch or finally
+
+[test_rethrow_outside]
+153_try_catch_errors.c:17: error: 'throw;' outside of a catch block
+
+[test_goto_in]
+153_try_catch_errors.c:33: error: goto enters a protected try/catch/finally region
+
+[test_switch_in]
+153_try_catch_errors.c:42: error: 'case' label enters a protected try/catch/finally region
+
+[test_finally_return]
+153_try_catch_errors.c:58: error: control cannot leave a finally block
+
+[test_finally_goto]
+153_try_catch_errors.c:74: error: control cannot leave a finally block
+
+[test_finally_break]
+153_try_catch_errors.c:85: error: control cannot leave a finally block

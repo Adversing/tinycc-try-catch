@@ -164,6 +164,7 @@ endif
 
 # try/catch/finally
 152_try_catch.test: FLAGS += -ftry-catch
+153_try_catch_errors.test: FLAGS += -ftry-catch -dt
 
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)
