@@ -162,6 +162,9 @@ endif
 # uses 'void main'; the process status is incidental
 137_funcall_struct_args.test: STATUS = any
 
+# try/catch/finally
+152_try_catch.test: FLAGS += -ftry-catch
+
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)
 146_tls_extern.test: T1 = \
