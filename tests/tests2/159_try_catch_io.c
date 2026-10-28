@@ -186,10 +186,72 @@ static void test_fscanf(void)
     remove("159_try_catch_io.scan2.tmp");
 }
 
+static void test_controlled_failures(void)
+{
+    const char *path = "159_try_catch_io.failure.tmp";
+    FILE *fp = fopen(path, "wb");
+    int i, scenario;
+
+    CHECK(fp != NULL);
+    if (fp == NULL)
+        return;
+    fputs("data", fp);
+    fclose(fp);
+    for (scenario = 0; scenario < 3; ++scenario) {
+        for (i = 0; i < 20; ++i) {
+            int caught = 0;
+            allocs = frees = closes = 0;
+            force_read_error = scenario != 0;
+            force_close_error = scenario != 1;
+            try {
+                count_bytes(path);
+                CHECK(0 && "controlled failure must throw");
+            }
+            catch (E_IO e) {
+                struct io_failure detail;
+                CHECK(e.payload != NULL && e.payload_size == sizeof detail);
+                if (e.payload != NULL && e.payload_size == sizeof detail) {
+                    memcpy(&detail, e.payload, sizeof detail);
+                    CHECK(e.type == (force_read_error ? &E_IO_READ : &E_IO));
+                    CHECK(strcmp(detail.operation,
+                                 force_read_error ? "read" : "close") == 0);
+                    CHECK(detail.error_number == (force_read_error ? EIO : ENOSPC));
+                }
+                caught = 1;
+            }
+            CHECK(caught && allocs == 1 && frees == 1 && closes == 1);
+        }
+    }
+    force_read_error = force_close_error = 0;
+    CHECK(add_count((size_t)-4, 3) == (size_t)-1);
+    allocs = frees = closes = 0;
+    try {
+        FILE *owned_stream = NULL;
+        void *owned_buffer = NULL;
+        try {
+            owned_buffer = xmalloc(4096);
+            owned_stream = xopen(path, "rb");
+            CHECK(owned_buffer != NULL && owned_stream != NULL);
+            add_count((size_t)-4, 4);
+            CHECK(0 && "count overflow must throw");
+        }
+        finally {
+            close_stream(&owned_stream);
+            xfree(owned_buffer);
+        }
+    }
+    catch (E_OVERFLOW e) {
+        CHECK(e.type == &E_OVERFLOW && e.payload == NULL && e.payload_size == 0);
+    }
+    CHECK(allocs == 1 && frees == 1 && closes == 1);
+    remove(path);
+}
+
 int main(void)
 {
     test_reads();
     test_fscanf();
+    test_controlled_failures();
     printf("try/catch io failures=%d\n", fails);
     return fails != 0;
 }
