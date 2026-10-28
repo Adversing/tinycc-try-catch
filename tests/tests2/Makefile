@@ -178,6 +178,7 @@ endif
 157_try_catch_bound.test: STATUS = 255
 158_try_catch_uncaught.test: FLAGS += -ftry-catch
 158_try_catch_uncaught.test: STATUS = nonzero
+159_try_catch_io.test: FLAGS += -ftry-catch
 157_try_catch_bound.test 158_try_catch_uncaught.test: FILTER += \
     -e 's;[0-9A-Fa-fx]\{5,\};........;g' \
     -e 's;0x[0-9A-Fa-f]\{1,\};0x?;g'
