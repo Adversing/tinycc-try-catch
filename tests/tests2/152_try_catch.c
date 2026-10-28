@@ -85,6 +85,69 @@ static int ret_double(void)
     }
 }
 
+static int loop_break(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < 5; ++i) {
+        try {
+            if (i == 1)
+                break;
+            ++n;
+        }
+        finally {
+            n += 10;
+        }
+    }
+    return n;
+}
+
+static int loop_continue(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < 4; ++i) {
+        try {
+            if (i == 1)
+                continue;
+            ++n;
+        }
+        finally {
+            n += 10;
+        }
+    }
+    return n;
+}
+
+static int goto_out(void)
+{
+    int n = 0;
+
+    try {
+        goto out;
+    }
+    finally {
+        n += 2;
+    }
+out:
+    return n;
+}
+
+static int goto_inside(void)
+{
+    int n = 0;
+
+    try {
+        goto inside;
+inside:
+        n = 7;
+    }
+    finally {
+        n += 10;
+    }
+    return n;
+}
+
 int main(void)
 {
     int n, matched;
@@ -217,6 +280,12 @@ int main(void)
     p = ret_struct();
     CHECK(p.a == 11 && p.b == 2.25);
     CHECK(finals == 1);
+
+    /* break/continue/goto out run finalizers exactly once. */
+    CHECK(loop_break() == 21);
+    CHECK(loop_continue() == 43);
+    CHECK(goto_out() == 2);
+    CHECK(goto_inside() == 17);
 
     printf("try/catch core failures=%d\n", fails);
     return fails != 0;
