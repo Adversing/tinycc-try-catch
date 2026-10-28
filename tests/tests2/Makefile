@@ -165,6 +165,7 @@ endif
 # try/catch/finally
 152_try_catch.test: FLAGS += -ftry-catch
 153_try_catch_errors.test: FLAGS += -ftry-catch -dt
+# last-option-wins in the enabling direction, native separate objects
 154_try_catch_link.test: FLAGS += -fno-try-catch -ftry-catch -g
 154_try_catch_link.test: NORUN = true
 154_try_catch_link.test: T1 = \
@@ -183,6 +184,7 @@ endif
 161_try_catch_type_errors.test: FLAGS += -ftry-catch -dt
 162_try_catch_ctor.test: FLAGS += -ftry-catch -g
 162_try_catch_ctor.test: NORUN = true
+163_try_catch_ordinary.test: FLAGS += -ftry-catch
 157_try_catch_bound.test 158_try_catch_uncaught.test: FILTER += \
     -e 's;[0-9A-Fa-fx]\{5,\};........;g' \
     -e 's;0x[0-9A-Fa-f]\{1,\};0x?;g'
