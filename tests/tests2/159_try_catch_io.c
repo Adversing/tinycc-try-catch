@@ -247,11 +247,102 @@ static void test_controlled_failures(void)
     remove(path);
 }
 
+static int scan_pair(FILE *fp)
+{
+    int a, b, assigned, scan_errno;
+
+    errno = 0;
+    assigned = fscanf(fp, "%d %d", &a, &b);
+    scan_errno = errno;
+    if (assigned != 2) {
+        struct io_failure detail = { 0, "scan" };
+
+        if (ferror(fp)) {
+            detail.error_number = scan_errno;
+            throw E_IO_READ, &detail, sizeof detail;
+        }
+        if (feof(fp))
+            throw E_EOF;
+        throw E_FORMAT;
+    }
+    return a + b;
+}
+
+static int read_pair(void)
+{
+    FILE *fp = NULL;
+    int result = 0;
+
+    try {
+        fp = fopen("159_try_catch_io.called.tmp", "w+b");
+        if (fp == NULL)
+            throw E_IO;
+        fputs("10 bad\n", fp);
+        rewind(fp);
+        result = scan_pair(fp);
+    }
+    finally {
+        close_stream(&fp);
+        remove("159_try_catch_io.called.tmp");
+    }
+    return result;
+}
+
+static void test_called_failure(void)
+{
+    int got = 0;
+
+    closes = 0;
+    try {
+        read_pair();
+        CHECK(0 && "scan failure must throw");
+    }
+    catch (E_FORMAT e) {
+        got = e.type == &E_FORMAT && e.payload_size == 0;
+    }
+    CHECK(got);
+    CHECK(closes == 1);
+}
+
+static void test_handles(void)
+{
+#ifdef _WIN32
+    typedef BOOL (WINAPI *GET_HANDLE_COUNT)(HANDLE, PDWORD);
+    HMODULE kernel;
+    GET_HANDLE_COUNT get_count;
+    DWORD before, after;
+    int i;
+
+    kernel = LoadLibraryA("kernel32.dll");
+    if (kernel == NULL)
+        return;
+    get_count = (GET_HANDLE_COUNT)GetProcAddress(kernel, "GetProcessHandleCount");
+    if (get_count == NULL) {
+        FreeLibrary(kernel);
+        return;
+    }
+    get_count(GetCurrentProcess(), &before);
+    for (i = 0; i < 100; ++i) {
+        try {
+            count_bytes("159_try_catch_io.missing");
+            ++fails;
+        }
+        catch (E_IO) {
+        }
+    }
+    get_count(GetCurrentProcess(), &after);
+    CHECK(after <= before);
+    FreeLibrary(kernel);
+#endif
+}
+
 int main(void)
 {
     test_reads();
     test_fscanf();
     test_controlled_failures();
+    test_called_failure();
+    test_handles();
     printf("try/catch io failures=%d\n", fails);
     return fails != 0;
 }
