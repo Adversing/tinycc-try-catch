@@ -148,6 +148,92 @@ inside:
     return n;
 }
 
+static void deep_finally(void)
+{
+    try {
+        note('d');
+        throw E_CHILD;
+    }
+    finally {
+        note('D');
+        ++finals;
+    }
+}
+
+static void middle_finally(void)
+{
+    try {
+        deep_finally();
+    }
+    finally {
+        note('M');
+        ++finals;
+    }
+}
+
+static void replace_pending(void)
+{
+    try {
+        try {
+            throw E_BASE;
+        }
+        finally {
+            note('r');
+            throw E_OTHER;
+        }
+    }
+    catch (E_BASE e) {
+        note('a');
+    }
+    catch (E_OTHER e) {
+        note('o');
+    }
+}
+
+static void return_replaced(void)
+{
+    try {
+        return;
+    }
+    finally {
+        throw E_OTHER;
+    }
+}
+
+static void vla_and_locals(void)
+{
+    int n = 6;
+    int a[n];
+    int i;
+    double d = 1.5;
+    const char *p = "before";
+
+    for (i = 0; i < n; ++i)
+        a[i] = i * 2;
+    try {
+        int m = 4;
+        int b[m];
+
+        for (i = 0; i < m; ++i)
+            b[i] = 100 + i;
+        d = 6.25;
+        p = "after";
+        throw E_CHILD, &a[0], sizeof a[0];
+    }
+    catch (E_CHILD e) {
+        int got;
+
+        CHECK(a[0] == 0 && a[5] == 10);
+        CHECK(d == 6.25);
+        CHECK(strcmp(p, "after") == 0);
+        got = *(const int *)e.payload;
+        CHECK(got == 0);
+    }
+    finally {
+        CHECK(a[3] == 6);
+    }
+}
+
 int main(void)
 {
     int n, matched;
@@ -286,6 +372,36 @@ int main(void)
     CHECK(loop_continue() == 43);
     CHECK(goto_out() == 2);
     CHECK(goto_inside() == 17);
+
+    /* Propagation through called functions. */
+    finals = 0;
+    trace[0] = 0;
+    try {
+        middle_finally();
+        CHECK(0 && "must throw");
+    }
+    catch (E_BASE e) {
+        CHECK(e.type == &E_CHILD);
+    }
+    CHECK(finals == 2);
+    CHECK(strcmp(trace, "dDM") == 0);
+
+    /* A throw from finally replaces the pending action. */
+    trace[0] = 0;
+    replace_pending();
+    CHECK(strcmp(trace, "ro") == 0);
+
+    /* A throw from finally replaces a pending return. */
+    matched = 0;
+    try {
+        return_replaced();
+    }
+    catch (E_OTHER e) {
+        matched = 1;
+    }
+    CHECK(matched);
+
+    vla_and_locals();
 
     printf("try/catch core failures=%d\n", fails);
     return fails != 0;
