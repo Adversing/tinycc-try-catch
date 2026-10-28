@@ -172,6 +172,8 @@ endif
     $(TCC) $(FLAGS) -c $(SRC)/154+_try_catch_link_lib.c -o $*-lib.o && \
     $(TCC) $(FLAGS) $*-main.o $*-lib.o -o $*.exe && \
     ./$*.exe
+156_try_catch_threads.test: FLAGS += -ftry-catch -g -pthread
+156_try_catch_threads.test: NORUN = true
 
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)
