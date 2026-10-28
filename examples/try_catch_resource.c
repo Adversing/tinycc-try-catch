@@ -96,3 +96,30 @@ static size_t count_bytes(const char *path)
     return count;
 }
 
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+        return 2;
+
+    try {
+        printf("%llu\n", (unsigned long long)count_bytes(argv[1]));
+    }
+    catch (E_IO e) {
+        struct io_failure detail;
+
+        fprintf(stderr, "%s at %s:%d\n", e.type->name, e.file, e.line);
+        if ((e.type == &E_IO || e.type == &E_IO_READ)
+            && e.payload != NULL && e.payload_size == sizeof detail) {
+            memcpy(&detail, e.payload, sizeof detail);
+            fprintf(stderr, "%.*s failed (errno=%d)\n",
+                    (int)sizeof detail.operation, detail.operation,
+                    detail.error_number);
+        }
+        return 1;
+    }
+    catch (TCC_Exception e) {
+        fprintf(stderr, "%s\n", e.type->name);
+        return 1;
+    }
+    return 0;
+}
