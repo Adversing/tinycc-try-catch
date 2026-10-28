@@ -1119,6 +1119,60 @@ dynamically scoped, so it is unavailable in a function called by a handler
 and in a finally that follows the catch.  An explicit-category throw always
 creates a new exception and a new location.
 
+@subsection Finally
+
+A finally runs exactly once whenever control leaves the associated construct
+after entering it:
+
+@itemize
+@item normal completion of the try or a selected catch;
+@item @code{return}, @code{break}, @code{continue} or direct @code{goto}
+      that leaves the construct;
+@item an unmatched exception, including propagation through a called
+      function on its way to an outer handler;
+@item a new throw or rethrow from a catch or from the finally itself.
+@end itemize
+
+Nested constructs finalize from innermost to outermost.  A jump that stays
+inside the protected region does not run its finalizer.  A return expression
+is evaluated once before finalization and its full typed value is preserved;
+assignments in the finally do not change it.  A throw from a finally cancels
+a pending return, jump or exception and replaces it, without entering the
+same finally again.  If a nested try inside a finally handles its own
+exception, the outer pending action resumes unchanged.
+
+@code{return}, @code{break}, @code{continue} and @code{goto} may not leave
+a finally body.  Throws are allowed.  Loops, switches and jumps wholly
+inside the finally keep their ordinary behavior.
+
+@subsection Locals, stack allocation and cleanup
+
+Exception transfers preserve the last stored values of automatic objects
+whose scopes remain live, including resource pointers assigned inside the
+try.  User code does not need to add @code{volatile}.  Objects in abandoned
+scopes lose their lifetime.
+
+A transfer to a checkpoint also discards @code{alloca} and VLA storage
+allocated after that checkpoint, even though the containing function
+continues.  Storage allocated before the checkpoint remains valid until an
+older checkpoint is reached.  Do not keep pointers into discarded storage;
+allocate such data before the protected region or use owned heap storage.
+
+The existing GNU @code{cleanup} attribute keeps its normal behavior on
+normal exits.  This extension does not add exceptional unwinding of cleanup
+attributes in abandoned scopes or foreign frames.  Use @code{finally} for
+resources that must be released during exception propagation.
+
+@subsection Control-flow restrictions
+
+Within a function that contains extension constructs, computed @code{goto}
+and @code{asm goto} are rejected with a diagnostic; they remain available
+in other functions.  A direct @code{goto} may stay inside a protected region
+or leave it (with the required finalizers), but may not enter a try, catch
+or finally from outside or from a sibling region.  A @code{switch} case or
+default label likewise may not enter a protected region from outside.
+Forward gotos are validated once their source and target ancestry are known.
+
 
 @section TinyCC extensions
 
