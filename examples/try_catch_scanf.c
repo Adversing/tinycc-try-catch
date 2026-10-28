@@ -75,3 +75,67 @@ static int read_record(const char *path, struct record *record)
     return assigned == 2;
 }
 
+static void write_file(const char *path, const char *text)
+{
+    FILE *fp = fopen(path, "w");
+
+    if (fp != NULL) {
+        fputs(text, fp);
+        fclose(fp);
+    }
+}
+
+static void report(const char *label, const char *path)
+{
+    struct record record;
+
+    try {
+        if (read_record(path, &record))
+            printf("%s: assigned 2, number=%d, word=%s\n",
+                   label, record.number, record.word);
+    }
+    catch (E_SCAN e) {
+        struct scan_failure detail;
+
+        if (e.payload != NULL && e.payload_size == sizeof detail) {
+            memcpy(&detail, e.payload, sizeof detail);
+            if (detail.kind == SCAN_EOF)
+                printf("%s: EOF\n", label);
+            else if (detail.kind == SCAN_MATCH)
+                printf("%s: format mismatch\n", label);
+            else
+                printf("%s: I/O failure in %.*s, errno=%d\n", label,
+                       (int)sizeof detail.operation, detail.operation,
+                       detail.error_number);
+        }
+    }
+    catch (TCC_Exception e) {
+        printf("%s: unexpected %s\n", label, e.type->name);
+    }
+}
+
+int main(void)
+{
+    const char *good = "examples_try_catch_scan_good.tmp";
+    const char *bad = "examples_try_catch_scan_bad.tmp";
+    const char *missing = "examples_try_catch_scan_missing.tmp";
+    const char *empty = "examples_try_catch_scan_empty.tmp";
+    const char *partial = "examples_try_catch_scan_partial.tmp";
+
+    write_file(good, "42 word\n");
+    write_file(bad, "bad word\n");
+    write_file(empty, "");
+    write_file(partial, "42\n");
+
+    report("good", good);
+    report("bad", bad);
+    report("empty", empty);
+    report("partial", partial);
+    report("missing", missing);
+
+    remove(good);
+    remove(bad);
+    remove(empty);
+    remove(partial);
+    return 0;
+}
