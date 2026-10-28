@@ -34,7 +34,56 @@ static void note(char c)
     trace[n + 1] = 0;
 }
 
-struct pair { long a; double b; };
+static int ret_nested(void)
+{
+    int x = 3;
+
+    try {
+        try {
+            return x;
+        }
+        finally {
+            note('i');
+            x = 4;
+        }
+    }
+    finally {
+        note('o');
+        x = 5;
+    }
+}
+
+struct pair {
+    long a;
+    double b;
+};
+
+static struct pair ret_struct(void)
+{
+    struct pair p = { 11, 2.25 };
+
+    try {
+        return p;
+    }
+    finally {
+        p.a = 0;
+        p.b = 0;
+        ++finals;
+    }
+}
+
+static int ret_double(void)
+{
+    double d = 1.25;
+
+    try {
+        return (int)(d * 4.0);
+    }
+    finally {
+        d = 9.0;
+        ++finals;
+    }
+}
 
 int main(void)
 {
@@ -154,6 +203,20 @@ int main(void)
                   && e.payload == NULL && e.payload_size == 0;
     }
     CHECK(matched);
+
+    /* Returns run finalizers and keep the evaluated value. */
+    trace[0] = 0;
+    CHECK(ret_nested() == 3);
+    CHECK(strcmp(trace, "io") == 0);
+
+    finals = 0;
+    CHECK(ret_double() == 5);
+    CHECK(finals == 1);
+
+    finals = 0;
+    p = ret_struct();
+    CHECK(p.a == 11 && p.b == 2.25);
+    CHECK(finals == 1);
 
     printf("try/catch core failures=%d\n", fails);
     return fails != 0;
