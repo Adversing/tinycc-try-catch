@@ -165,6 +165,13 @@ endif
 # try/catch/finally
 152_try_catch.test: FLAGS += -ftry-catch
 153_try_catch_errors.test: FLAGS += -ftry-catch -dt
+154_try_catch_link.test: FLAGS += -fno-try-catch -ftry-catch -g
+154_try_catch_link.test: NORUN = true
+154_try_catch_link.test: T1 = \
+    $(TCC) $(FLAGS) -c $1 -o $*-main.o && \
+    $(TCC) $(FLAGS) -c $(SRC)/154+_try_catch_link_lib.c -o $*-lib.o && \
+    $(TCC) $(FLAGS) $*-main.o $*-lib.o -o $*.exe && \
+    ./$*.exe
 
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)
