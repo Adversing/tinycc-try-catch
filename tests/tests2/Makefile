@@ -181,6 +181,8 @@ endif
 159_try_catch_io.test: FLAGS += -ftry-catch
 160_try_catch_review.test: FLAGS += -ftry-catch
 161_try_catch_type_errors.test: FLAGS += -ftry-catch -dt
+162_try_catch_ctor.test: FLAGS += -ftry-catch -g
+162_try_catch_ctor.test: NORUN = true
 157_try_catch_bound.test 158_try_catch_uncaught.test: FILTER += \
     -e 's;[0-9A-Fa-fx]\{5,\};........;g' \
     -e 's;0x[0-9A-Fa-f]\{1,\};0x?;g'
