@@ -174,6 +174,11 @@ endif
     ./$*.exe
 156_try_catch_threads.test: FLAGS += -ftry-catch -g -pthread
 156_try_catch_threads.test: NORUN = true
+157_try_catch_bound.test: FLAGS += -ftry-catch -b
+157_try_catch_bound.test: STATUS = 255
+157_try_catch_bound.test 158_try_catch_uncaught.test: FILTER += \
+    -e 's;[0-9A-Fa-fx]\{5,\};........;g' \
+    -e 's;0x[0-9A-Fa-f]\{1,\};0x?;g'
 
 # Verify that undefined TLS symbols in TCC objects work with the system linker.
 # (note: '$*' is '146_tls_extern' here)

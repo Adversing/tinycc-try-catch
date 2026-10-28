@@ -1,0 +1,2 @@
+157_try_catch_bound.c:19: at main: BCHECK: ........ (size 4) is outside of the region (..................)
+157_try_catch_bound.c:19: at main: RUNTIME ERROR: invalid memory access
