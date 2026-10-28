@@ -1173,6 +1173,34 @@ or finally from outside or from a sibling region.  A @code{switch} case or
 default label likewise may not enter a protected region from outside.
 Forward gotos are validated once their source and target ancestry are known.
 
+@subsection Execution modes
+
+The extension works with native executables, @code{-run}, separately
+compiled and linked objects, and public libtcc compile, relocate, run and
+delete lifecycles.  Each thread has its own frame chain.  Native startup
+registers runtime shutdown with @code{atexit}; libtcc caches the shutdown
+entry point before generated code is released.  With @option{-b}, checkpoints
+use @code{__bound_setjmp} and transfers use the bounds-aware longjmp path.
+
+This tree builds and runs the extension on Windows x86_64.  The lowering
+contains PE x86_64, PE ARM64, PE i386 and non-PE @code{setjmp} paths, but the
+other targets have not been executed here and are not claimed.  Cross-DLL
+propagation and transfer between independently relocated libtcc programs are
+outside this version; ordinary multi-object linking into one program is
+supported.  An uncaught exception runs all intervening finalizers, prints
+the concrete category and available source location, and aborts.  Process
+termination, @code{abort}, hardware faults, asynchronous cancellation and a
+raw user @code{longjmp} do not promise finally execution.
+
+See @file{examples/try_catch_resource.c} for a complete file-reading example
+that releases its stream and buffer on every path, and
+@file{examples/try_catch_scanf.c} for checking @code{fscanf} assignment
+counts while distinguishing EOF, matching failure and read errors.  Both
+run with:
+
+@example
+tcc -ftry-catch -run examples/try_catch_resource.c file.txt
+@end example
 
 @section TinyCC extensions
 
