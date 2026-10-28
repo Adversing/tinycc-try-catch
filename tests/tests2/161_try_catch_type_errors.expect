@@ -1,0 +1,5 @@
+[test_foreign_throw]
+161_try_catch_type_errors.c:11: error: 'Fake' is not a const struct tcc_exception_type object with static storage duration
+
+[test_foreign_catch]
+161_try_catch_type_errors.c:19: error: 'Fake' is not a const struct tcc_exception_type object with static storage duration
