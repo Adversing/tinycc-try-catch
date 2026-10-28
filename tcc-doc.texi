@@ -302,6 +302,13 @@ Create eh_frame section [on]
 Create code coverage code. After running the resulting code an executable.tcov
 or sofile.tcov file is generated with code coverage.
 
+@item -ftry-catch
+Enable the @code{try}, @code{catch}, @code{throw} and @code{finally}
+language extension and reserve those four words.  The default is
+@option{-fno-try-catch}, which treats the words as ordinary identifiers.
+The last of the two options wins.  See the ``Try, catch and finally''
+section in @ref{Clang} for the language and runtime rules.
+
 @end table
 
 @subheading Warning Options
@@ -996,6 +1003,122 @@ control-flow transfer to C labels:
   @end itemize
 
 @end itemize
+
+@section Try, catch and finally
+
+TinyCC provides an optional exception extension using the real keywords
+@code{try}, @code{catch}, @code{throw} and @code{finally}.  It is disabled
+by default; compile with @option{-ftry-catch} to enable it and to reserve
+those four words throughout the C syntax.  With @option{-fno-try-catch}
+they remain ordinary identifiers.  The last option value wins, including
+options set through the libtcc API.  The extension defines
+@code{__TINYC_TRY_CATCH__} to @code{1} when enabled.
+
+A translation unit that uses the extension must include
+@file{<tcc_exception.h>} first.  That header declares the public category
+and exception records.  It does not define macros that alias the keywords,
+and an ordinary C compiler can use it for descriptor declarations.
+The statement syntax itself requires the modified TinyCC.
+
+@subsection Categories and matching
+
+An exception category is an immutable object of the public type:
+
+@example
+struct tcc_exception_type @{
+    const struct tcc_exception_type *parent;
+    const char *name;
+@};
+@end example
+
+Define shared categories once and declare them with @code{extern} in
+headers; a @code{static const} object is a private category.  Category
+identity is the address of the descriptor object.  Names are diagnostics
+only: two objects with the same name are different categories.  The
+runtime provides @code{TCC_Exception} (the root, with a null parent),
+@code{TCC_OutOfMemory} and @code{TCC_InvalidException}.
+
+@example
+static const struct tcc_exception_type E_IO = @{
+    &TCC_Exception, "app.io"
+@};
+static const struct tcc_exception_type E_IO_READ = @{
+    &E_IO, "app.io.read"
+@};
+@end example
+
+A @code{catch} matches the concrete category or any ancestor, comparing
+descriptor addresses.  Catch clauses are tried in source order, so a
+parent clause placed before a child hides the child.  @code{catch (...)}
+matches any exception and must be the last catch.  The parent chain is
+validated before propagation; cycles and an invalid null parent produce
+@code{TCC_InvalidException}.
+
+An exception record passed to a handler has this public shape:
+
+@example
+struct tcc_exception @{
+    const struct tcc_exception_type *type;
+    const void *payload;
+    size_t payload_size;
+    const char *file;
+    int line;
+@};
+@end example
+
+@code{type} remains the concrete category even when an ancestor caught it.
+Payload layout is an application contract; check the concrete category and
+size before decoding the bytes.
+
+@subsection Statements and payload
+
+@example
+try @{
+    ...
+@}
+catch (E_IO_READ e) @{
+    ...
+@}
+catch (...) @{
+    ...
+@}
+finally @{
+    ...
+@}
+@end example
+
+All bodies require braces.  A @code{try} must have at least one catch or a
+finally, and a finally must be last.  @code{catch (E_IO)} and
+@code{catch (TCC_Exception)} omit the binding; the binding is a
+@code{const struct tcc_exception} view of the caught object and is scoped
+to its catch body.
+
+The throw forms are:
+
+@example
+throw E_IO;
+throw E_IO, &detail, sizeof detail;
+throw;
+@end example
+
+A two-operand payload throw evaluates the source address and the byte count
+once each, copies the bytes into runtime-owned storage, and then unwinds.
+The size may be zero, in which case the source address is not dereferenced.
+A null address with a positive size, an invalid runtime size, or copying-size
+overflow throws @code{TCC_InvalidException}; allocation failure throws the
+allocation-independent @code{TCC_OutOfMemory}.  A statically known negative
+byte count of a signed integer type is rejected at compile time.  Pointers
+inside the copied bytes are not followed-the copy is a byte copy, not
+serialization.  Use @code{memcpy} to read a known payload layout into a typed
+local.
+
+@code{throw;} rethrows the original object of the lexically innermost
+enclosing catch, including an unbound catch or @code{catch (...)}.  It keeps
+the concrete category, payload and original throw location.  It is not
+dynamically scoped, so it is unavailable in a function called by a handler
+and in a finally that follows the catch.  An explicit-category throw always
+creates a new exception and a new location.
+
 
 @section TinyCC extensions
 
